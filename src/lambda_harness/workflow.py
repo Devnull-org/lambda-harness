@@ -452,6 +452,51 @@ class Harness(CheckRunner):
             save_json(Path(state["report_directory"]) / "current-review.json", self._view(state))
             return self._view(self._state(task_id))
 
+    def task_chat(self, task_id, text):
+        """Discuss a task without advancing or rewriting its pending checkpoint."""
+        if not text.strip():
+            raise ValueError("Enter a question about this task")
+        with self._lock():
+            state = copy.deepcopy(self._state(task_id))
+            if state.get("task_kind") == "agent_builder":
+                raise ValueError("Use the agent design conversation for this task")
+            turn = uuid4().hex
+            path = Path(state["directory"]) / "task-chat.json"
+            messages = json.loads(path.read_text()) if path.exists() else []
+            messages.append({"role": "chat", "text": text, "task_chat_message": turn + ":user"})
+            save_json(path, messages)
+            state["messages"] = conversation_messages(state)
+            try:
+                result = self._ask(
+                    state,
+                    "chat",
+                    task_chat_turn=turn,
+                    latest_user_message=text,
+                    messages=state["messages"],
+                    task_stage=state["stage"],
+                    pending_step=state.get("prompt"),
+                    check_results=state.get("check_results"),
+                    findings=state.get("findings", []),
+                )
+                result.pop("memory_note", None)
+                if generation := getattr(self.agent, "last_generation", None):
+                    result["generation"] = copy.deepcopy(generation)
+            except (Exception, KeyboardInterrupt):
+                messages.append(
+                    {
+                        "role": "chat",
+                        "task_chat_message": turn + ":assistant",
+                        "answer": "This chat reply did not complete. "
+                        "Your workflow step is unchanged. You can send the question again.",
+                        "references": [],
+                    }
+                )
+                save_json(path, messages)
+                raise
+            messages.append({"role": "chat", "task_chat_message": turn + ":assistant", **result})
+            save_json(path, messages)
+            return self._view(self._state(task_id))
+
     def respond(self, task_id, action, **fields):
         if "automatic" in fields and not isinstance(fields["automatic"], bool):
             raise ValueError("Automatic must be enabled or disabled")
@@ -631,6 +676,7 @@ class Harness(CheckRunner):
         }
         if state.get("agent_origin"):
             view["agent_id"] = state["agent_origin"]["id"]
+        view["can_task_chat"] = state.get("task_kind") not in {"agent_builder", "chat"}
         if view.get("prompt", {}).get("summary") == (
             "Fix selected. Start the indicated phase to address it."
         ):
@@ -989,6 +1035,10 @@ class Harness(CheckRunner):
             self._check_agent_checkout(state, workspace, state["agent_integrity_fingerprint"])
             del state["agent_integrity_fingerprint"]
         cache = Path(state["directory"]) / "proposals" / f"{state['seq']:04d}-{role}.json"
+        if extra.get("task_chat_turn"):
+            cache = (
+                Path(state["directory"]) / "task-chat-proposals" / f"{extra['task_chat_turn']}.json"
+            )
         if cache.exists():
             result = json.loads(cache.read_text())
         else:

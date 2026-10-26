@@ -1579,3 +1579,30 @@ def test_browser_discovers_then_executes_checks_without_another_model_request(
     assert view["stage"] == "checks_complete"
     assert len(executor.calls) == 4
     assert len(agent.calls) == 1
+
+
+def test_task_chat_endpoint_keeps_saved_phase_and_returns_conversation(browser_app, monkeypatch):
+    app, call, _, _ = browser_app
+    agent, executor = ScriptedAgent(), ScriptedExecutor()
+    monkeypatch.setattr("lambda_harness.webapp.RoutedAgent", lambda *a, **kw: agent)
+    monkeypatch.setattr("lambda_harness.webapp.select_backend", lambda *a: "test")
+    monkeypatch.setattr("lambda_harness.webapp.LocalExecutor", lambda **kw: executor)
+    harness = app.harness(agent)
+    try:
+        before = harness.start("task", "Fix addOne")
+    finally:
+        harness.close()
+    agent.responses["chat"].append({"answer": "Suggested commit subject", "references": []})
+    status, _ = call(
+        "/api/command",
+        {"command": "task_chat", "task_id": "task", "text": "Suggest a commit message"},
+    )
+    assert status == 202
+    wait_for(lambda: not call("/api/state")[1]["job"]["running"])
+    state = call("/api/state?task=task")[1]
+    assert state["job"]["error"] is None
+    assert state["task"]["stage"] == before["stage"]
+    assert state["task"]["prompt"] == before["prompt"]
+    assert state["task"]["messages"][-1]["answer"] == "Suggested commit subject"
+    assert state["task"]["can_task_chat"]
+    assert not executor.calls

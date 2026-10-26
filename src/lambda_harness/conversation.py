@@ -17,6 +17,17 @@ def interview_message(specification, questions, turn):
 
 
 def conversation_messages(state):
+    messages = _workflow_messages(state)
+    path = Path(state["directory"]) / "task-chat.json"
+    recorded = {m.get("task_chat_message") for m in messages}
+    if path.exists():
+        messages.extend(
+            m for m in json.loads(path.read_text()) if m["task_chat_message"] not in recorded
+        )
+    return messages
+
+
+def _workflow_messages(state):
     """Recover successful interview turns from journals without rewriting checkpoints."""
     messages = state["messages"]
     if state.get("task_kind", "feature") != "feature":

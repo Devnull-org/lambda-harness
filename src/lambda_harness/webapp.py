@@ -324,6 +324,7 @@ class LocalApp:
         allowed = {
             "checks",
             "task_checks",
+            "task_chat",
             "start",
             "agent_builder",
             "chat",
@@ -446,6 +447,8 @@ class LocalApp:
                 )
             elif action == "task_checks":
                 result = harness.run_task_checks(task_id)
+            elif action == "task_chat":
+                result = harness.task_chat(task_id, command.get("text", ""))
             elif action in {"start", "explore", "chat"}:
                 if not command.get("base"):
                     raise ValueError("Choose a base branch or commit")

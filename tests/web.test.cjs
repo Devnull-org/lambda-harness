@@ -3051,3 +3051,44 @@ test("new test-runner tasks need no manually specified package list", async () =
   await settle();
   assert.equal(posted.command, "checks");
 });
+
+test("conversation task chat sends a contextual question without a workflow action", async () => {
+  const current = snapshot({
+    ...task(),
+    stage: "tests_requested",
+    can_task_chat: true,
+    prompt: { actions: [], available_phases: ["tests"] },
+  });
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({});
+      }
+      return response(current);
+    },
+  });
+  assert.equal(ui.elements.get("task-chat").hidden, false);
+  assert.equal(ui.elements.get("task-chat-send").disabled, false);
+  ui.elements.get("task-chat-message").value = "Suggest a commit message";
+  await ui.elements.get("task-chat-send").onclick();
+  assert.equal(posted.command, "task_chat");
+  assert.equal(posted.task_id, "example");
+  assert.equal(posted.text, "Suggest a commit message");
+  assert.equal(posted.action, undefined);
+  assert.equal(posted.automatic, undefined);
+  assert.equal(ui.elements.get("task-chat-message").value, "");
+  current.job = {
+    running: true,
+    task_id: "example",
+    operation: "task_chat",
+    log: [],
+  };
+  ui.run("render()");
+  assert.equal(ui.elements.get("task-chat-send").disabled, true);
+  assert.match(
+    ui.elements.get("task-chat-status").textContent,
+    /preparing a reply/,
+  );
+});

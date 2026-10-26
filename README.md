@@ -118,3 +118,11 @@ The website runs locally. Model requests use your chosen provider. The harness
 creates no pull requests and pushes no code automatically.
 
 [Explore the workflow →](docs/GUIDE.md) · [Configure project checks →](docs/VALIDATION.md)
+
+In an existing task's **Conversation** section, use **Chat about this task** to
+ask for explanations, a commit message, or a summary of the results. Select a
+model above the chat box and send your question. The model receives the task
+conversation, specification, current diff, and validation evidence. Replies stay
+in that task's conversation across restarts and handoffs. Task chat does not edit
+files, commit changes, or advance the current workflow or pending approval; use
+the **Task actions** controls to request implementation changes.

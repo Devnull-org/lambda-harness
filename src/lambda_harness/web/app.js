@@ -592,6 +592,7 @@ async function command(body) {
       "tests",
       "checks",
       "task_checks",
+      "task_chat",
       "respond",
       "run",
       "resume",
@@ -691,7 +692,10 @@ function render() {
     const item = button(
       task.task_id,
       async () => {
-        if (selected !== task.task_id) $("message").value = "";
+        if (selected !== task.task_id) {
+          $("message").value = "";
+          $("task-chat-message").value = "";
+        }
         selected = task.task_id;
         showPage("workspace");
         memoryPreviewId++;
@@ -1188,6 +1192,13 @@ function renderTask(task, running) {
   $("export-task").disabled = running || task.checks_in_task;
   $("task-checks").hidden = !task.can_run_checks;
   $("task-checks").disabled = running;
+  $("task-chat").hidden = !task.can_task_chat;
+  $("task-chat-send").disabled = running;
+  $("task-chat-status").textContent = running
+    ? state.job?.operation === "task_chat"
+      ? "The model is reading this task and preparing a reply…"
+      : "Wait for the current operation to finish, or stop it before chatting."
+    : "Replies appear in the conversation above. Ctrl/⌘ + Enter sends.";
   renderWorktree(task);
   renderHistory(task);
   if (key !== packetKey) {
@@ -2105,6 +2116,41 @@ $("new-task").onclick = () =>
 $("refresh").onclick = () => guard(refresh);
 $("task-checks").onclick = () =>
   guard(() => command({ command: "task_checks", task_id: selected }));
+async function sendTaskChat() {
+  const text = $("task-chat-message").value;
+  if (!text.trim()) throw new Error("Enter a question about this task.");
+  const taskId = selected;
+  pendingMessage = {
+    task_id: taskId,
+    text,
+    after: (state.task.messages || []).length,
+    status: "Sending task question…",
+  };
+  renderHistory(state.task);
+  try {
+    await command({ command: "task_chat", task_id: taskId, text });
+    if (pendingMessage) pendingMessage.status = "Sent · waiting for the agent";
+    if (selected === taskId && $("task-chat-message").value === text)
+      $("task-chat-message").value = "";
+  } catch (error) {
+    if (pendingMessage)
+      pendingMessage.status = "Not sent · review the error and retry";
+    throw error;
+  } finally {
+    if (state?.task) renderHistory(state.task);
+  }
+}
+$("task-chat-send").onclick = () => guard(sendTaskChat);
+$("task-chat-message").onkeydown = (e) => {
+  if (
+    e.key === "Enter" &&
+    (e.ctrlKey || e.metaKey) &&
+    !$("task-chat-send").disabled
+  ) {
+    e.preventDefault();
+    $("task-chat-send").click();
+  }
+};
 $("latest-message").onclick = () => {
   $("history").scrollTop = $("history").scrollHeight;
 };
