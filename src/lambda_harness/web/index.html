@@ -604,6 +604,26 @@
       </section>
       <section id="work" hidden>
         <div id="task-meta" class="metadata"></div>
+        <div
+          id="task-worktree"
+          class="worktree-inline"
+          role="group"
+          aria-labelledby="worktree-title"
+          hidden
+        >
+          <label id="worktree-title" for="worktree-path">Worktree</label>
+          <input
+            id="worktree-path"
+            type="text"
+            aria-label="Task worktree path"
+            readonly
+            spellcheck="false"
+          />
+          <button id="copy-worktree" class="quiet" type="button" disabled>
+            Copy path
+          </button>
+          <span id="worktree-status" class="muted" role="status"></span>
+        </div>
         <section
           id="task-outcome"
           class="panel task-outcome"
@@ -647,29 +667,6 @@
             ><button id="export-task" class="quiet">Export handoff</button
             ><button id="abandon" class="quiet danger">Delete task</button>
           </div>
-        </section>
-        <section
-          id="task-worktree"
-          class="panel"
-          aria-labelledby="worktree-title"
-          hidden
-        >
-          <div class="worktree-heading">
-            <h2 id="worktree-title">Task worktree</h2>
-            <button id="copy-worktree" type="button" disabled>Copy path</button>
-          </div>
-          <p class="muted">
-            Open this folder on the computer running the harness to inspect the
-            agent’s files.
-          </p>
-          <textarea
-            id="worktree-path"
-            aria-label="Task worktree path"
-            rows="2"
-            readonly
-            spellcheck="false"
-          ></textarea>
-          <p id="worktree-status" class="muted" role="status"></p>
         </section>
         <div class="conversation-heading">
           <h2>Conversation</h2>

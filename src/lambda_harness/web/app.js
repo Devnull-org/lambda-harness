@@ -1108,6 +1108,7 @@ function renderWorktree(task) {
   if (panel.dataset.task !== task.task_id || field.value !== path) {
     panel.dataset.task = task.task_id;
     field.value = path;
+    field.title = path;
     field.hidden = !path;
     $("copy-worktree").disabled = !path;
     $("worktree-status").textContent = path
