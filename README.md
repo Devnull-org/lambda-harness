@@ -56,6 +56,19 @@ while validation and reviews continue. Existing commits and Git settings are pre
 Signing errors include a terminal unlock suggestion based on the
 [GnuPG guidance](https://www.gnupg.org/documentation/manuals/gnupg/Common-Problems.html).
 
+Use **Run all checks and tests** on a completed task step to invoke the **Test runner**
+agent in that task's worktree, including its uncommitted changes. It reads repository
+instructions, task recipes, CI, and test manifests, then presents an ordered command
+plan with suite coverage and omissions. Review the plan and choose **Run all checks
+and tests** to execute it. Formatters such as `nix fmt` and `just lint` run first and
+their changes stay in the worktree. The runner collects results for every planned
+command, even when an earlier check fails, and supports stopping and rerunning.
+It does not create commits. Use **Return to coding task** afterward; changed content
+requires accepting the diff and revalidating before coding or review continues.
+
+For a separate check task, choose **Run checks and tests** under New task and select
+a base revision. Customize the **Test runner** definition and assignment on Agents.
+
 ```mermaid
 flowchart LR
   Explore --> Interview

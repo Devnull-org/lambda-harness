@@ -200,8 +200,12 @@ class LocalExecutor:
         self.cancel = cancel
         self.cancellation = cancellation
 
-    def __call__(self, argv, cwd, *, report_glob=None):
-        actual = ["nix", "develop", self.nix_flake or str(cwd), "--command", *argv]
+    def __call__(self, argv, cwd, *, report_glob=None, use_nix=True, project_root=None):
+        actual = (
+            ["nix", "develop", self.nix_flake or str(project_root or cwd), "--command", *argv]
+            if use_nix
+            else argv
+        )
         started = time.time_ns()
         scope = (
             self.cancellation.request(kind="validation")

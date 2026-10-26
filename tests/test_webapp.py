@@ -1539,3 +1539,43 @@ def test_browser_rejects_invalid_automatic_choice(browser_app):
     )
     assert code == 400
     assert "Automatic" in response["error"]
+
+
+def test_browser_discovers_then_executes_checks_without_another_model_request(
+    browser_app, monkeypatch
+):
+    from .test_check_runner import CheckExecutor, plan
+
+    app, call, _, _ = browser_app
+    agent, executor = ScriptedAgent(), CheckExecutor()
+    agent.responses["test_runner"].append(plan())
+    monkeypatch.setattr("lambda_harness.webapp.RoutedAgent", lambda *a, **kw: agent)
+    monkeypatch.setattr("lambda_harness.webapp.select_backend", lambda *a: "test")
+    monkeypatch.setattr("lambda_harness.webapp.LocalExecutor", lambda **kw: executor)
+    assert (
+        call("/api/command", {"command": "checks", "task_id": "all-checks", "base": "main"})[0]
+        == 202
+    )
+    wait_for(lambda: not call("/api/state")[1]["job"]["running"])
+    view = call("/api/state?task=all-checks")[1]["task"]
+    assert view["stage"] == "checks_plan" and not executor.calls
+    monkeypatch.setattr(
+        "lambda_harness.webapp.select_backend", lambda *a: pytest.fail("Unexpected backend check")
+    )
+    assert (
+        call(
+            "/api/command",
+            {
+                "command": "respond",
+                "task_id": "all-checks",
+                "action": "run_checks",
+                "token": view["prompt"]["approval_token"],
+            },
+        )[0]
+        == 202
+    )
+    wait_for(lambda: not call("/api/state")[1]["job"]["running"])
+    view = call("/api/state?task=all-checks")[1]["task"]
+    assert view["stage"] == "checks_complete"
+    assert len(executor.calls) == 4
+    assert len(agent.calls) == 1

@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from .agent_context import CODING_ROLES, NODE_ROLES, messages_for_agent
 from .agent_library import AVATARS, ROLES, AgentLibrary
+from .check_runner import CheckRunner
 from .cleanup import cleanup_plan, remove_resources
 from .conversation import conversation_messages, interview_message
 from .failures import AgentInterrupted, BackendError, BackendResponseError
@@ -61,7 +62,7 @@ PHASE_NODES = {
 }
 
 
-class Harness:
+class Harness(CheckRunner):
     def __init__(
         self,
         repository,
@@ -94,6 +95,8 @@ class Harness:
         )
         builder = StateGraph(dict)
         nodes = (
+            "plan_checks",
+            "run_checks",
             "prepare",
             "chat",
             "agent_builder",
@@ -490,6 +493,8 @@ class Harness:
                 "revise_changes",
                 "deny_changes",
                 "continue_without_commits",
+                "run_checks",
+                "revalidate_changes",
             }:
                 if fields.get("approval_token") != state["prompt"].get("approval_token"):
                     raise ValueError("Stale or missing approval token")
@@ -605,6 +610,7 @@ class Harness:
                 "stage",
                 "mode",
                 "commit_policy",
+                "check_plan",
                 "prompt",
                 "worktree",
                 "base",
@@ -687,6 +693,24 @@ class Harness:
             }
         if actions := self._review_actions(state):
             view["review_actions"] = actions
+        view["can_run_checks"] = state.get("next") == "end" and state.get("task_kind") not in {
+            "review",
+            "agent_builder",
+            "checks",
+        }
+        view["checks_in_task"] = bool(state.get("checks_origin"))
+        if state.get("check_results"):
+            view["check_results"] = {
+                **state["check_results"],
+                "commands": [
+                    {
+                        **command,
+                        "stdout": command.get("stdout", "")[-6000:],
+                        "stderr": command.get("stderr", "")[-6000:],
+                    }
+                    for command in state["check_results"]["commands"]
+                ],
+            }
         view["outcome"] = self._outcome(state, view["prompt"])
         return view
 
@@ -694,6 +718,23 @@ class Harness:
     def _outcome(state, prompt):
         """Report saved workflow evidence without asking a model to invent a status."""
         stage = state["stage"]
+        if stage in {"checks_complete", "checks_failed"}:
+            result = state["check_results"]
+            return {
+                "kind": "success"
+                if result["status"] == "passed"
+                else "waiting"
+                if result["status"] == "partial"
+                else "error",
+                "title": {
+                    "passed": "Checks passed",
+                    "partial": "Checks passed with omissions",
+                    "stopped": "Checks stopped",
+                    "failed": "Checks failed",
+                }[result["status"]],
+                "detail": result["summary"],
+                "guidance": prompt.get("guidance", ""),
+            }
         errors = {"backend_blocked", "agent_error", "validation_blocked"}
         completed = {"ready", "review_complete", "tests_complete", "agent_ready"}
         if stage == "validation_blocked" and state.get("validation", {}).get("status") == "stopped":
@@ -765,7 +806,7 @@ class Harness:
         )
 
     def _available_phases(self, state):
-        if state.get("task_kind") in {"tests", "review", "chat", "agent_builder"}:
+        if state.get("task_kind") in {"tests", "review", "chat", "agent_builder", "checks"}:
             return []
         following = {
             "specification_ready": ["explore", "interview", "tests", "implement", "refactor"],
@@ -840,7 +881,10 @@ class Harness:
                 state["retry_node"] = name
                 actions = (
                     ["retry", "recheck"]
-                    if state.get("validation") and not state.get("agent_integrity_fingerprint")
+                    if state.get("validation")
+                    and not state.get("agent_integrity_fingerprint")
+                    and not state.get("checks_origin")
+                    and state.get("task_kind") != "checks"
                     else ["retry"]
                 )
                 if isinstance(error, AgentInterrupted):
@@ -1598,7 +1642,13 @@ class Harness:
             self._validated(state)
 
     def _validated(self, state):
-        if state.pop("checking_baseline", False):
+        if boundary := state.pop("checks_resume_boundary", None):
+            if boundary not in {"tests_requested", "refactor_requested"}:
+                raise ValueError("Invalid phase after check-runner revalidation")
+            self._phase_complete(
+                state, boundary, "Formatting revalidated. Continue the requested step."
+            )
+        elif state.pop("checking_baseline", False):
             state["next"] = PHASE_NODES[state["selected_phase"]]
         elif state["role"] == "test_author":
             self._gate(
@@ -1833,7 +1883,9 @@ class Harness:
         action, stage = response["action"], state["stage"]
         if "automatic" in response:
             state["mode"] = "full" if response["automatic"] else "phased"
-        if action == "continue_without_commits":
+        if stage.startswith("checks_"):
+            self._checks_reply(state, action, response.get("text", ""))
+        elif action == "continue_without_commits":
             self._continue_without_commits(state)
         elif action == "choose_phase":
             for key in (

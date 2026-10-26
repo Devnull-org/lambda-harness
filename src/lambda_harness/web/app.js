@@ -216,6 +216,9 @@ const phaseLabels = {
 };
 labels.repair = "Ask agent to fix the failure";
 labels.continue_without_commits = "Continue without commits";
+labels.run_checks = "Run all checks and tests";
+labels.return_to_task = "Return to coding task";
+labels.revalidate_changes = "Accept formatting changes and revalidate";
 const textActions = ["answer", "question", "revise", "revise_changes"];
 function stageLabel(stage) {
   return stage === "test_change_review"
@@ -587,6 +590,8 @@ async function command(body) {
       "start",
       "review",
       "tests",
+      "checks",
+      "task_checks",
       "respond",
       "run",
       "resume",
@@ -849,6 +854,42 @@ function renderSuggestedCommands(parent, commands) {
   }
   parent.append(section);
 }
+function renderCheckResults(parent, result) {
+  if (!result) return;
+  parent.append(prose(result.summary));
+  for (const command of result.commands || []) {
+    const details = el("details");
+    const passed = command.exit_code === 0 && !command.error;
+    details.append(
+      el(
+        "summary",
+        `${passed ? "Passed" : "Failed / stopped"}: ${command.name}`,
+      ),
+    );
+    details.append(el("pre", (command.argv || []).join(" ")));
+    if (command.files_changed)
+      details.append(prose("This command changed files in the worktree."));
+    if (command.error) details.append(prose(command.error));
+    details.append(
+      el("pre", (command.stdout || "") + "\n" + (command.stderr || "")),
+    );
+    parent.append(details);
+  }
+  if (result.not_run?.length)
+    parent.append(prose("Not run: " + result.not_run.join(", ")));
+  if (result.omissions?.length)
+    parent.append(prose("Omitted: " + result.omissions.join("\n")));
+  if (result.report_directory)
+    parent.append(prose("Full logs: " + result.report_directory));
+  if (result.diff) {
+    const changes = el("details");
+    changes.append(
+      el("summary", "Worktree diff (includes earlier uncommitted edits)"),
+      diffView(result.diff),
+    );
+    parent.append(changes);
+  }
+}
 function renderHistory(task) {
   const messages = task.messages || [];
   const progress = responseProgress(task.task_id);
@@ -941,6 +982,8 @@ function renderHistory(task) {
       for (const question of item.questions || [])
         entry.append(prose(question));
       history.append(entry);
+    } else if (item.role === "test_runner" && item.answer) {
+      history.append(message("Test runner", item.answer));
     } else if (item.role === "test_author" && item.answer) {
       history.append(message("Test author", item.answer));
     } else if (item.role === "agent_builder") {
@@ -1080,7 +1123,9 @@ function renderTask(task, running) {
     }
   }
   $("execution-controls").hidden =
-    (task.task_kind || "feature") !== "feature" || task.stage === "ready";
+    (task.task_kind || "feature") !== "feature" ||
+    task.stage === "ready" ||
+    task.stage.startsWith("checks_");
   $("execution-mode").value =
     executionChoices.get(executionKey(task)) ||
     (task.mode === "full" ? "full" : "phased");
@@ -1140,6 +1185,9 @@ function renderTask(task, running) {
       ),
     );
   $("export-task").hidden = task.task_kind === "agent_builder";
+  $("export-task").disabled = running || task.checks_in_task;
+  $("task-checks").hidden = !task.can_run_checks;
+  $("task-checks").disabled = running;
   renderWorktree(task);
   renderHistory(task);
   if (key !== packetKey) {
@@ -1183,6 +1231,36 @@ function renderTask(task, running) {
       packet.append(el("h2", prompt.summary));
     if (prompt.error) packet.append(prose(prompt.error));
     if (prompt.guidance) packet.append(prose(prompt.guidance));
+    if (task.check_plan && task.stage.startsWith("checks_")) {
+      const plan = task.check_plan;
+      packet.append(el("h3", "Check plan"), prose(plan.summary));
+      for (const command of plan.commands) {
+        packet.append(
+          el(
+            "strong",
+            command.name + (command.modifies_files ? " · rewrites files" : ""),
+          ),
+          el("pre", command.argv.join(" ")),
+          prose(command.purpose),
+          el(
+            "small",
+            `Directory: ${command.directory} · Environment: ${command.environment}`,
+          ),
+        );
+      }
+      packet.append(
+        el("h3", "Suite coverage"),
+        prose(plan.coverage.join("\n")),
+      );
+      if (plan.omissions.length)
+        packet.append(
+          el("h3", "Not covered"),
+          prose(plan.omissions.join("\n")),
+        );
+      packet.append(prose("Sources: " + plan.sources.join(", ")));
+      if (task.stage !== "checks_plan")
+        renderCheckResults(packet, task.check_results);
+    }
     renderSuggestedCommands(packet, prompt.suggested_commands);
     if (prompt.explanation) packet.append(prose(prompt.explanation));
     if (prompt.permission_reason)
@@ -1403,8 +1481,7 @@ function renderTask(task, running) {
     $("actions").append(control);
     $("composer").hidden = false;
   }
-  for (const id of ["resume", "restart", "abandon", "export-task"])
-    $(id).disabled = running;
+  for (const id of ["resume", "restart", "abandon"]) $(id).disabled = running;
 }
 async function respond(action) {
   if (submitting || state?.job?.running) return;
@@ -1953,7 +2030,7 @@ function updateNewTask() {
   $("base-label").textContent = github
     ? "Comparison base (optional override)"
     : "Base branch or commit";
-  $("request").required = !review;
+  $("request").required = !review && kind !== "checks";
   $("request-label").textContent = review
     ? "Review focus (optional)"
     : tests
@@ -1968,11 +2045,17 @@ function updateNewTask() {
       : kind === "chat"
         ? "What would you like to talk about? Ask a general question, discuss code, or brainstorm an idea."
         : "Describe what you want to understand or build. Paste an issue, add context, and take as many lines as you need.";
+  if (kind === "checks") {
+    $("request-label").textContent = "Checks to include (optional)";
+    $("request").placeholder =
+      "Discover all repository checks and test suites. Include commands such as nix fmt, just lint, and just check where applicable.";
+  }
   $("start-task").textContent = {
     explore: "Start exploration →",
     start: "Start interview →",
     review: "Start review →",
     tests: "Write tests →",
+    checks: "Discover checks and tests →",
     chat: "Start chat →",
   }[kind];
   renderModelPicker();
@@ -2020,6 +2103,8 @@ $("new-task").onclick = () =>
     await refresh();
   });
 $("refresh").onclick = () => guard(refresh);
+$("task-checks").onclick = () =>
+  guard(() => command({ command: "task_checks", task_id: selected }));
 $("latest-message").onclick = () => {
   $("history").scrollTop = $("history").scrollHeight;
 };

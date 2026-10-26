@@ -322,6 +322,8 @@ class LocalApp:
 
     def start(self, command):
         allowed = {
+            "checks",
+            "task_checks",
             "start",
             "agent_builder",
             "chat",
@@ -424,7 +426,9 @@ class LocalApp:
                         progress=self.progress,
                     )
             if action not in {"abandon", "review_action"} and not (
-                action == "respond" and command.get("action") in {"save_agent", "continue_handoff"}
+                action == "respond"
+                and command.get("action")
+                in {"save_agent", "continue_handoff", "run_checks", "return_to_task"}
             ):
                 selected = select_backend(agent, self.args.repo)
                 self.selected_backend = selected
@@ -436,6 +440,12 @@ class LocalApp:
                 result = harness.start_agent_builder(
                     task_id, command.get("request", ""), agent_id=command.get("agent_id")
                 )
+            elif action == "checks":
+                result = harness.start_checks(
+                    task_id, command.get("request", ""), base=command.get("base") or "HEAD"
+                )
+            elif action == "task_checks":
+                result = harness.run_task_checks(task_id)
             elif action in {"start", "explore", "chat"}:
                 if not command.get("base"):
                     raise ValueError("Choose a base branch or commit")

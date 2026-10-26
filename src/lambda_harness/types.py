@@ -18,7 +18,13 @@ class Agent(Protocol):
 
 class Executor(Protocol):
     def __call__(
-        self, argv: list[str], cwd: Path, *, report_glob: str | None = None
+        self,
+        argv: list[str],
+        cwd: Path,
+        *,
+        report_glob: str | None = None,
+        use_nix: bool = True,
+        project_root: Path | None = None,
     ) -> CommandResult: ...
 
 

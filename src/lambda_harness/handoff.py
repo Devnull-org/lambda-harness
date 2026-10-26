@@ -16,12 +16,15 @@ from pydantic import Field, JsonValue
 from .agent_library import assignment_problem
 from .conversation import conversation_messages
 from .process import run_process
-from .schemas import REVIEWERS, AgentDefinition, Exploration, Record, Specification
+from .schemas import REVIEWERS, AgentDefinition, CheckPlan, Exploration, Record, Specification
 from .workspace import Workspace, digest, git, task_branch, validate_task_name
 
 MAX_HANDOFF_BYTES = 32 * 1024 * 1024
 MAX_TASKS = 30
 GATES = {
+    "checks_plan": {"question", "revise", "run_checks"},
+    "checks_complete": {"question", "revise", "run_checks"},
+    "checks_failed": {"question", "revise", "run_checks"},
     "interview": {"answer"},
     "specification_review": {"approve", "question", "revise"},
     "chat": {"answer"},
@@ -54,6 +57,8 @@ BOUNDARIES = {
     "review_complete",
 }
 RETRY_NODES = {
+    "plan_checks",
+    "run_checks",
     "discover_validation",
     "chat",
     "explore",
@@ -85,6 +90,10 @@ LOCAL_FIELDS = {
     "handoff_resume",
 }
 STATE_FIELDS = {
+    "check_plan",
+    "check_results",
+    "check_history",
+    "checks_resume_boundary",
     "seq",
     "task_id",
     "request",
@@ -275,6 +284,8 @@ def _validate_state(state):
         raise ValueError("Invalid validation phase")
     if state.get("test_strategy") not in {None, "new", "existing"}:
         raise ValueError("Invalid test strategy")
+    if state.get("checks_resume_boundary") not in {None, "tests_requested", "refactor_requested"}:
+        raise ValueError("Invalid phase after check-runner revalidation")
     if state.get("commit_policy") not in {None, "manual"}:
         raise ValueError("Invalid commit policy")
     if "uncommitted_patches" in state and (
@@ -317,7 +328,7 @@ def _validate_state(state):
             raise ValueError("Handoff must contain a paused review gate")
     elif stage not in BOUNDARIES or state["next"] != "end" or actions:
         raise ValueError("Handoff must contain a completed phase or a paused review gate")
-    if state.get("task_kind") not in {None, "chat", "tests", "review"}:
+    if state.get("task_kind") not in {None, "chat", "tests", "review", "checks"}:
         raise ValueError("Share agent definitions through their Git repository")
     if state["initial_phase"] not in {
         "interview",
@@ -325,6 +336,7 @@ def _validate_state(state):
         "explore",
         "worktree",
         "standalone_review",
+        "plan_checks",
     }:
         raise ValueError("Unsupported task phase")
     if state.get("retry_node") is not None and state["retry_node"] not in RETRY_NODES:
@@ -336,6 +348,8 @@ def _validate_state(state):
         _path(name)
     for name in state.get("approved_tests", {}):
         _path(name)
+    if state.get("check_plan"):
+        CheckPlan.model_validate(state["check_plan"])
     if "specification" in state:
         Specification.model_validate(state["specification"])
         if any(
@@ -464,6 +478,8 @@ def export_handoff(harness, task_ids):
         for task_id in task_ids:
             checkpoint = harness.graph.get_state(harness._config(task_id))
             state = copy.deepcopy(harness._state(task_id))
+            if state.get("checks_origin"):
+                raise ValueError("Return to the coding task before exporting its handoff")
             state["messages"] = conversation_messages(state)
             if checkpoint.next and not checkpoint.interrupts:
                 raise ValueError("Stop the task at a review gate before exporting")

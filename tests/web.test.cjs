@@ -2951,3 +2951,103 @@ test("recovery commands stay visible in conversation history", async () => {
   const ui = await app({ fetcher: async () => response(current) });
   assert.match(ui.elements.get("history").textContent, /tool --version/);
 });
+
+test("test runner can be invoked in the selected worktree", async () => {
+  const current = snapshot({
+    ...task(),
+    stage: "refactor_ready",
+    can_run_checks: true,
+  });
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({});
+      }
+      return response(current);
+    },
+  });
+  assert.equal(ui.elements.get("task-checks").hidden, false);
+  await ui.elements.get("task-checks").onclick();
+  assert.equal(posted.command, "task_checks");
+  assert.equal(posted.task_id, "example");
+});
+
+test("test runner shows command effects, missing suites, and individual failures", async () => {
+  const current = snapshot({
+    ...task(),
+    task_kind: "checks",
+    stage: "checks_failed",
+    check_plan: {
+      summary: "Inspect full coverage",
+      commands: [
+        {
+          name: "Format",
+          argv: ["nix", "fmt"],
+          purpose: "Format files",
+          modifies_files: true,
+          directory: ".",
+          environment: "project",
+        },
+      ],
+      coverage: ["Unit tests"],
+      omissions: ["Nightly AWS"],
+      sources: ["justfile"],
+    },
+    check_results: {
+      summary: "Build failed",
+      commands: [
+        {
+          name: "Build",
+          argv: ["just", "check"],
+          exit_code: 1,
+          stderr: "compiler error",
+        },
+      ],
+      not_run: [],
+      omissions: ["Nightly AWS"],
+    },
+    prompt: {
+      actions: ["run_checks", "question"],
+      approval_token: "plan-token",
+    },
+  });
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({});
+      }
+      return response(current);
+    },
+  });
+  assert.match(ui.elements.get("packet").textContent, /rewrites files/);
+  assert.match(ui.elements.get("packet").textContent, /Nightly AWS/);
+  assert.match(ui.elements.get("packet").textContent, /compiler error/);
+  await ui.run('respond("run_checks")');
+  assert.equal(posted.token, "plan-token");
+});
+
+test("new test-runner tasks need no manually specified package list", async () => {
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({});
+      }
+      return response(snapshot());
+    },
+  });
+  ui.kind.value = "checks";
+  ui.run("updateNewTask()");
+  assert.equal(ui.elements.get("test-packages").required, false);
+  assert.equal(ui.elements.get("request").required, false);
+  ui.elements.get("task-name").value = "all-checks";
+  ui.elements.get("base").value = "main";
+  ui.elements.get("new-form").onsubmit({ preventDefault() {} });
+  await settle();
+  assert.equal(posted.command, "checks");
+});

@@ -173,6 +173,55 @@ class RecoveryReply(Explanation):
     next_action: Literal["retry", "recheck", "continue_without_commits"] | None = None
 
 
+class CheckCommand(Record):
+    name: str = Field(min_length=1, max_length=120)
+    argv: list[str] = Field(min_length=1, max_length=100)
+    directory: str = "."
+    environment: Literal["project", "nix"] = "project"
+    purpose: str = Field(min_length=1)
+    modifies_files: bool = False
+
+    @model_validator(mode="after")
+    def valid_command(self):
+        from pathlib import PurePosixPath
+
+        path = PurePosixPath(self.directory)
+        if (
+            path.is_absolute()
+            or ".." in path.parts
+            or ".git" in path.parts
+            or "\\" in self.directory
+            or "\x00" in self.directory
+            or not self.directory
+        ):
+            raise ValueError("Check directory must stay inside the worktree")
+        if any(not arg or "\x00" in arg for arg in self.argv):
+            raise ValueError("Command arguments must be nonempty text without NUL bytes")
+        return self
+
+
+class CheckPlan(Record):
+    summary: str = Field(min_length=1)
+    sources: list[str] = Field(min_length=1, max_length=100)
+    coverage: list[str] = Field(min_length=1, max_length=100)
+    commands: list[CheckCommand] = Field(max_length=50)
+    omissions: list[str] = Field(default_factory=list)
+    questions: list[str] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def ordered_plan(self):
+        if not self.commands and not self.questions:
+            raise ValueError("Provide commands or ask about missing prerequisites")
+        if len({command.name for command in self.commands}) != len(self.commands):
+            raise ValueError("Check names must be unique")
+        checking = False
+        for command in self.commands:
+            if command.modifies_files and checking:
+                raise ValueError("Run formatters before verification commands")
+            checking |= not command.modifies_files
+        return self
+
+
 class PatchConversation(Explanation):
     proposal: Patch | None = Field(
         default=None,
@@ -203,6 +252,7 @@ class ChatReply(Explanation):
 
 
 AgentRole = Literal[
+    "test_runner",
     "chat",
     "explorer",
     "interviewer",
@@ -232,6 +282,7 @@ class AgentDraft(Explanation):
 
 
 SCHEMAS = {
+    "test_runner": CheckPlan,
     "validation_discovery": ValidationDiscovery,
     "agent_builder": AgentDraft,
     "chat": ChatReply,

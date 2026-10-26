@@ -28,7 +28,24 @@ def project_files(workspace):
             or path.name.startswith("cabal.project")
             or name.startswith(".github/workflows/")
             or path.name.lower().startswith(("readme", "contributing"))
-            or path.name in {"Main.hs", "Spec.hs", "TastyMain.hs", "package.yaml"}
+            or path.name
+            in {
+                "Main.hs",
+                "Spec.hs",
+                "TastyMain.hs",
+                "package.yaml",
+                "package.json",
+                "pyproject.toml",
+                "Cargo.toml",
+                "go.mod",
+                "tox.ini",
+                "pytest.ini",
+                "pnpm-workspace.yaml",
+                "pom.xml",
+                "build.gradle",
+                "Gemfile",
+                ".pre-commit-config.yaml",
+            }
         ):
             candidates.append(name)
     return sorted(candidates)

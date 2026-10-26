@@ -396,6 +396,16 @@
                 ></span
               >
             </label>
+            <label class="choice">
+              <input type="radio" name="kind" value="checks" />
+              <span
+                ><strong>Run checks and tests</strong
+                ><small
+                  >Discover repository commands, then run formatting, lint,
+                  builds, and all test suites.</small
+                ></span
+              >
+            </label>
             <label class="choice"
               ><input type="radio" name="kind" value="tests" />
               <span
@@ -515,6 +525,9 @@
       </section>
       <section id="work" hidden>
         <div id="task-meta" class="metadata"></div>
+        <button id="task-checks" class="quiet" hidden>
+          Run all checks and tests
+        </button>
         <section
           id="task-outcome"
           class="panel task-outcome"
