@@ -273,6 +273,8 @@ class LocalApp:
                 task["request"] = saved["request"]
                 task["messages"] = conversation_messages(saved)
                 task["can_use_context"] = harness.can_use_context(task_id)
+                with ProjectSettings(harness.state_dir) as preferences:
+                    task["model_selection"] = preferences.task_model(task_id)
         finally:
             harness.close()
         active = self.cancellation.active
@@ -343,6 +345,13 @@ class LocalApp:
         if not isinstance(command.get("task_id"), str):
             raise ValueError("Choose a task name")
         validate_task_name(command["task_id"])
+        command = dict(command)
+        if "backend" not in command and "model" not in command:
+            with ProjectSettings(
+                state_directory(self.args.repo, self.args.state_dir)
+            ) as preferences:
+                if saved := preferences.task_model(command["task_id"]):
+                    command.update(saved)
         for field in (
             "request",
             "base",
@@ -434,6 +443,12 @@ class LocalApp:
                 selected = select_backend(agent, self.args.repo)
                 self.selected_backend = selected
                 self.progress(f"Selected backend: {selected}")
+                with ProjectSettings(
+                    state_directory(self.args.repo, self.args.state_dir)
+                ) as preferences:
+                    preferences.save_task_model(
+                        task_id, selected, command.get("model", self.args.model)
+                    )
             if self.shutdown.is_set():
                 raise SelectionCancelled
             harness = self.harness(agent)

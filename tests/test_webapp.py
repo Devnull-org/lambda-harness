@@ -220,6 +220,35 @@ def test_exploration_follow_up_uses_the_selected_model(browser_app, tmp_path):
         ("explorer", "quick"),
         ("explorer", "careful"),
     ]
+    view = call("/api/state?task=research")[1]["task"]
+    assert view["model_selection"] == {"backend": "test", "model": "careful"}
+    assert [m["generation"]["model"] for m in view["messages"] if m.get("role") == "explorer"] == [
+        "quick",
+        "careful",
+    ]
+    # A fresh request without model fields keeps the saved choice, even if defaults change.
+    app.args.model = "different-default"
+    assert (
+        call(
+            "/api/command",
+            {
+                "command": "respond",
+                "task_id": "research",
+                "action": "question",
+                "text": "Continue the analysis",
+            },
+        )[0]
+        == 202
+    )
+    wait_for(lambda: app.job and not app.job["running"])
+    assert app.job["error"] is None
+    latest = json.loads(calls.read_text().splitlines()[-1])
+    assert (latest["role"], latest["model"]) == ("explorer", "careful")
+    from lambda_harness.project_context import state_directory
+    from lambda_harness.project_settings import ProjectSettings
+
+    with ProjectSettings(state_directory(app.args.repo, app.args.state_dir)) as saved:
+        assert saved.task_model("research") == {"backend": "test", "model": "careful"}
 
 
 def test_model_discovery_does_not_lock_state_or_stop_requests(browser_app, monkeypatch):
@@ -1592,7 +1621,7 @@ def test_task_chat_endpoint_keeps_saved_phase_and_returns_conversation(browser_a
         before = harness.start("task", "Fix addOne")
     finally:
         harness.close()
-    agent.responses["chat"].append({"answer": "Suggested commit subject", "references": []})
+    agent.responses["interviewer"].append({"answer": "Suggested commit subject"})
     status, _ = call(
         "/api/command",
         {"command": "task_chat", "task_id": "task", "text": "Suggest a commit message"},

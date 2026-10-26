@@ -24,6 +24,10 @@ class ProjectSettings:
             "CREATE TABLE IF NOT EXISTS settings "
             "(singleton INTEGER PRIMARY KEY CHECK(singleton = 1), backend TEXT NOT NULL)"
         )
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS task_models "
+            "(task_id TEXT PRIMARY KEY, backend TEXT NOT NULL, model TEXT)"
+        )
 
     def __enter__(self):
         return self
@@ -38,3 +42,15 @@ class ProjectSettings:
     def save_backend(self, backend):
         with self.connection:
             self.connection.execute("INSERT OR REPLACE INTO settings VALUES (1, ?)", (backend,))
+
+    def task_model(self, task_id):
+        row = self.connection.execute(
+            "SELECT backend, model FROM task_models WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return {"backend": row[0], "model": row[1]} if row else None
+
+    def save_task_model(self, task_id, backend, model):
+        with self.connection:
+            self.connection.execute(
+                "INSERT OR REPLACE INTO task_models VALUES (?, ?, ?)", (task_id, backend, model)
+            )

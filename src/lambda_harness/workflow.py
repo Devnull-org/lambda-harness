@@ -14,7 +14,7 @@ from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command, interrupt
 from pydantic import ValidationError
 
-from .agent_context import CODING_ROLES, NODE_ROLES, messages_for_agent
+from .agent_context import CODING_ROLES, NODE_ROLES, STAGE_ROLES, messages_for_agent
 from .agent_library import AVATARS, ROLES, AgentLibrary
 from .check_runner import CheckRunner
 from .cleanup import cleanup_plan, remove_resources
@@ -460,16 +460,25 @@ class Harness(CheckRunner):
             state = copy.deepcopy(self._state(task_id))
             if state.get("task_kind") == "agent_builder":
                 raise ValueError("Use the agent design conversation for this task")
+            role = (
+                STAGE_ROLES.get(state["stage"])
+                or ("explorer" if state["stage"] == "exploration_ready" else None)
+                or state.get("role")
+                or ("interviewer" if state.get("specification") else "chat")
+            )
+            if role == "reviewers":
+                role = "haskell_reviewer"
             turn = uuid4().hex
             path = Path(state["directory"]) / "task-chat.json"
             messages = json.loads(path.read_text()) if path.exists() else []
-            messages.append({"role": "chat", "text": text, "task_chat_message": turn + ":user"})
+            messages.append({"role": role, "text": text, "task_chat_message": turn + ":user"})
             save_json(path, messages)
             state["messages"] = conversation_messages(state)
             try:
                 result = self._ask(
                     state,
-                    "chat",
+                    role,
+                    **({"intent": "explain", "question": text} if role != "chat" else {}),
                     task_chat_turn=turn,
                     latest_user_message=text,
                     messages=state["messages"],
@@ -484,7 +493,7 @@ class Harness(CheckRunner):
             except (Exception, KeyboardInterrupt):
                 messages.append(
                     {
-                        "role": "chat",
+                        "role": role,
                         "task_chat_message": turn + ":assistant",
                         "answer": "This chat reply did not complete. "
                         "Your workflow step is unchanged. You can send the question again.",
@@ -493,7 +502,7 @@ class Harness(CheckRunner):
                 )
                 save_json(path, messages)
                 raise
-            messages.append({"role": "chat", "task_chat_message": turn + ":assistant", **result})
+            messages.append({"role": role, "task_chat_message": turn + ":assistant", **result})
             save_json(path, messages)
             return self._view(self._state(task_id))
 
@@ -916,6 +925,8 @@ class Harness(CheckRunner):
             if journal.exists():
                 return json.loads(journal.read_text())
             state["messages"] = conversation_messages(state)
+            message_count = len(state["messages"])
+            state.pop("_generation_for_turn", None)
             activity = (
                 "keeping validated changes uncommitted"
                 if name == "commit" and state.get("commit_policy") == "manual"
@@ -953,6 +964,11 @@ class Harness(CheckRunner):
                     self._gate(state, "backend_blocked", error.prompt(), ["retry"])
                 else:
                     self._gate(state, "agent_error", {"error": str(error)}, actions)
+            generations = state.pop("_generation_for_turn", {})
+            for message in state["messages"][message_count:]:
+                role = message.get("role") or message.get("agent_role") or NODE_ROLES.get(name)
+                if role in generations and not message.get("text"):
+                    message["generation"] = generations[role]
             state["seq"] += 1
             save_json(journal, state)
             return state
@@ -1041,6 +1057,9 @@ class Harness(CheckRunner):
             )
         if cache.exists():
             result = json.loads(cache.read_text())
+            receipt = cache.with_suffix(".generation.json")
+            if receipt.exists():
+                state.setdefault("_generation_for_turn", {})[role] = json.loads(receipt.read_text())
         else:
             for attempt in range(2):
                 try:
@@ -1095,6 +1114,10 @@ class Harness(CheckRunner):
                 self._check_agent_checkout(state, workspace, before)
                 break
             save_json(cache, result)
+            if generation := getattr(self.agent, "last_generation", None):
+                generation = copy.deepcopy(generation)
+                state.setdefault("_generation_for_turn", {})[role] = generation
+                save_json(cache.with_suffix(".generation.json"), generation)
         return result
 
     @staticmethod

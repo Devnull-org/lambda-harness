@@ -119,10 +119,14 @@ creates no pull requests and pushes no code automatically.
 
 [Explore the workflow →](docs/GUIDE.md) · [Configure project checks →](docs/VALIDATION.md)
 
-In an existing task's **Conversation** section, use **Chat about this task** to
-ask for explanations, a commit message, or a summary of the results. Select a
-model above the chat box and send your question. The model receives the task
-conversation, specification, current diff, and validation evidence. Replies stay
-in that task's conversation across restarts and handoffs. Task chat does not edit
-files, commit changes, or advance the current workflow or pending approval; use
-the **Task actions** controls to request implementation changes.
+Use the single message box in a task's **Conversation** section to talk to the
+agent handling that step. Exploration follow-ups go to the explorer; patch
+requests go through the current coding agent and its existing approval flow.
+Between steps, you can still ask the current agent for explanations or a commit
+message without starting the next phase. Workflow buttons remain in **Task actions**.
+
+Select the model above the message box. Your choice is remembered across page
+reloads and saved per task when a request starts. Explicit choices override role
+and provider defaults. Replies show the requested model and, when the provider
+reports it, the actual model ID. An unavailable selection fails visibly instead
+of silently switching to another model.

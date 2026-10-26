@@ -543,12 +543,12 @@ def test_task_chat_travels_with_handoff_and_can_continue(rig, recipient):
     source, agent, _ = rig
     target, target_agent, _ = recipient
     specification(source)
-    agent.responses["chat"].append({"answer": "Suggested commit message", "references": []})
+    agent.responses["interviewer"].append({"answer": "Suggested commit message"})
     source.task_chat("task", "Suggest a commit message")
     transfer(source, target, ["task"])
     accept(target, "task")
     assert conversation_messages(target._state("task"))[-1]["answer"] == "Suggested commit message"
-    target_agent.responses["chat"].append({"answer": "Shorter commit message", "references": []})
+    target_agent.responses["interviewer"].append({"answer": "Shorter commit message"})
     target.task_chat("task", "Make it shorter")
     assert any(
         m.get("answer") == "Suggested commit message" for m in target_agent.calls[-1][1]["messages"]

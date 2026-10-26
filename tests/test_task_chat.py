@@ -22,7 +22,7 @@ def test_task_chat_preserves_pending_approval_and_uses_changes_and_history(rig):
     source = workspace.path / SOURCE
     source.write_text(source.read_text() + "\n-- Explain this change\n")
     fingerprint = workspace.fingerprint()
-    agent.responses["chat"].append({"answer": "docs: explain addOne", "references": [SOURCE]})
+    agent.responses["interviewer"].append({"answer": "docs: explain addOne"})
     result = harness.task_chat("task", "Suggest a commit message")
     context = agent.calls[-1][1]
     assert "Explain this change" in context["diff"]
@@ -49,7 +49,7 @@ def test_chat_survives_reopening_and_does_not_repeat_replies_or_block_next_step(
         ("First suggestion", "Commit message?"),
         ("Second suggestion", "Shorter?"),
     ]:
-        agent.responses["chat"].append({"answer": answer, "references": []})
+        agent.responses["interviewer"].append({"answer": answer})
         harness.task_chat("task", question)
     assert any(m.get("answer") == "First suggestion" for m in agent.calls[-1][1]["messages"])
     reopened = Harness(repository, tmp_path / "state", agent, executor)
@@ -90,7 +90,7 @@ def test_failed_task_chat_keeps_workflow_and_can_be_retried(rig):
     assert harness._state("task") == original
     assert "did not complete" in conversation_messages(harness._state("task"))[-1]["answer"]
     harness.agent = normal_agent
-    agent.responses["chat"].append({"answer": "Here is the explanation", "references": []})
+    agent.responses["interviewer"].append({"answer": "Here is the explanation"})
     result = harness.task_chat("task", "Explain the task")
     assert result["stage"] == view["stage"]
     assert conversation_messages(harness._state("task"))[-1]["answer"] == "Here is the explanation"

@@ -3069,16 +3069,16 @@ test("conversation task chat sends a contextual question without a workflow acti
       return response(current);
     },
   });
-  assert.equal(ui.elements.get("task-chat").hidden, false);
-  assert.equal(ui.elements.get("task-chat-send").disabled, false);
-  ui.elements.get("task-chat-message").value = "Suggest a commit message";
-  await ui.elements.get("task-chat-send").onclick();
+  assert.equal(ui.elements.get("composer").hidden, false);
+  assert.equal(ui.elements.get("send").disabled, false);
+  ui.elements.get("message").value = "Suggest a commit message";
+  await ui.elements.get("send").onclick();
   assert.equal(posted.command, "task_chat");
   assert.equal(posted.task_id, "example");
   assert.equal(posted.text, "Suggest a commit message");
   assert.equal(posted.action, undefined);
   assert.equal(posted.automatic, undefined);
-  assert.equal(ui.elements.get("task-chat-message").value, "");
+  assert.equal(ui.elements.get("message").value, "");
   current.job = {
     running: true,
     task_id: "example",
@@ -3086,9 +3086,73 @@ test("conversation task chat sends a contextual question without a workflow acti
     log: [],
   };
   ui.run("render()");
-  assert.equal(ui.elements.get("task-chat-send").disabled, true);
+  assert.equal(ui.elements.get("send").disabled, true);
+});
+
+test("one conversation keeps the explorer action and restores a saved task model", async () => {
+  const current = snapshot({
+    ...task(),
+    can_task_chat: true,
+    model_selection: { backend: "test", model: "careful" },
+    prompt: { actions: ["question", "done"] },
+    messages: [
+      {
+        role: "explorer",
+        summary: "Research",
+        analysis: "What I found",
+        generation: {
+          backend: "test",
+          model: "careful",
+          reported_model: "careful-v2",
+        },
+      },
+    ],
+  });
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({});
+      }
+      return response(current);
+    },
+  });
+  ui.run("render()");
+  assert.equal(ui.elements.has("task-chat-message"), false);
+  assert.equal(ui.elements.get("composer").hidden, false);
+  assert.equal(
+    JSON.parse(ui.elements.get("reply-chat-model").value).model,
+    "careful",
+  );
   assert.match(
-    ui.elements.get("task-chat-status").textContent,
-    /preparing a reply/,
+    ui.elements.get("history").textContent,
+    /Requested: careful.*Reported: careful-v2/,
+  );
+  ui.elements.get("message").value = "Explain the tradeoffs";
+  await ui.elements.get("send").onclick();
+  assert.equal(posted.command, "respond");
+  assert.equal(posted.action, "question");
+  assert.equal(posted.model, "careful");
+});
+
+test("an unsent model selection survives a browser reload", async () => {
+  const saved = new Map();
+  const storage = {
+    getItem: (key) => saved.get(key) || null,
+    setItem: (key, value) => saved.set(key, value),
+  };
+  const first = await app({ storage });
+  first.run("render()");
+  first.elements.get("reply-chat-model").value = JSON.stringify({
+    backend: "test",
+    model: "careful",
+  });
+  first.elements.get("reply-chat-model").onchange();
+  const second = await app({ storage });
+  second.run("render()");
+  assert.equal(
+    JSON.parse(second.elements.get("reply-chat-model").value).model,
+    "careful",
   );
 });

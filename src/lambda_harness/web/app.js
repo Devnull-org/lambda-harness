@@ -120,6 +120,33 @@ let modelCatalog = null,
   modelLoadingKey = "",
   modelRequestId = 0;
 const modelChoices = new Map();
+try {
+  for (const [key, value] of JSON.parse(
+    globalThis.localStorage?.getItem("lambda-harness-model-choices") || "[]",
+  )) {
+    if (typeof key === "string" && typeof value === "string") {
+      const choice = JSON.parse(value || "{}");
+      if (
+        (!choice.backend || typeof choice.backend === "string") &&
+        (!choice.model || typeof choice.model === "string")
+      )
+        modelChoices.set(key, value);
+    }
+  }
+} catch {
+  /* Fall back to saved task preferences if browser storage is unavailable. */
+}
+function rememberModel(scope, value) {
+  modelChoices.set(scope, value);
+  try {
+    globalThis.localStorage?.setItem(
+      "lambda-harness-model-choices",
+      JSON.stringify([...modelChoices]),
+    );
+  } catch {
+    /* The server saves choices with each request too. */
+  }
+}
 const executionChoices = new Map();
 function executionKey(task) {
   return JSON.stringify([activeProject?.id || state?.repository, task.task_id]);
@@ -216,6 +243,7 @@ const phaseLabels = {
 };
 labels.repair = "Ask agent to fix the failure";
 labels.continue_without_commits = "Continue without commits";
+labels.task_chat = "Message agent";
 labels.run_checks = "Run all checks and tests";
 labels.return_to_task = "Return to coding task";
 labels.revalidate_changes = "Accept formatting changes and revalidate";
@@ -453,7 +481,10 @@ function modelScope(task = selected, backend = state?.backend || "auto") {
 function responseModelChoice() {
   const prefix = selected ? "reply" : "new";
   if ($(`${prefix}-model-picker`).hidden) return {};
-  return JSON.parse($(`${prefix}-chat-model`).value || "{}");
+  return JSON.parse(
+    $(`${prefix}-chat-model`).value ||
+      JSON.stringify({ backend: state?.backend || "auto", model: null }),
+  );
 }
 async function loadModels(force = false) {
   const key = modelKey(),
@@ -497,6 +528,8 @@ function renderModelPicker() {
     ? state.task.messages?.findLast((item) => item.generation)?.generation
     : null;
   let chosen = modelChoices.get(scope);
+  if (chosen === undefined && conversation && state.task.model_selection)
+    chosen = JSON.stringify(state.task.model_selection);
   if (
     chosen === undefined &&
     last &&
@@ -555,7 +588,7 @@ function renderModelPicker() {
 }
 for (const prefix of ["new", "reply"]) {
   $(`${prefix}-chat-model`).onchange = () => {
-    modelChoices.set(modelScope(), $(`${prefix}-chat-model`).value);
+    rememberModel(modelScope(), $(`${prefix}-chat-model`).value);
   };
   $(`${prefix}-refresh-models`).onclick = () => loadModels(true);
 }
@@ -608,7 +641,7 @@ async function command(body) {
   try {
     await api("/api/command", body);
     if (body.backend && Object.hasOwn(body, "model"))
-      modelChoices.set(
+      rememberModel(
         modelScope(body.task_id, body.backend),
         JSON.stringify({ backend: body.backend, model: body.model }),
       );
@@ -694,7 +727,6 @@ function render() {
       async () => {
         if (selected !== task.task_id) {
           $("message").value = "";
-          $("task-chat-message").value = "";
         }
         selected = task.task_id;
         showPage("workspace");
@@ -926,6 +958,13 @@ function renderHistory(task) {
   history.replaceChildren(message("Initial request", task.request, true));
   for (const item of messages) {
     if (item.text) history.append(message("You", item.text, true));
+    else if (item.task_chat_message && item.answer)
+      history.append(
+        message(
+          item.role === "chat" ? "Assistant" : item.role.replaceAll("_", " "),
+          item.answer,
+        ),
+      );
     else if (item.question) {
       history.append(message("You", item.question, true));
       if (item.answer) {
@@ -992,12 +1031,17 @@ function renderHistory(task) {
       history.append(message("Test author", item.answer));
     } else if (item.role === "agent_builder") {
       history.append(message("Agent builder", item.answer));
-    } else if (item.role === "chat") {
+    } else if (
+      item.role === "chat" ||
+      (item.task_chat_message && item.answer)
+    ) {
       const generation = item.generation;
       const entry = message(
         generation
           ? `Assistant · ${generation.backend} · ${generation.reported_model || generation.model || "provider default"}`
-          : "Assistant",
+          : item.role === "chat"
+            ? "Assistant"
+            : item.role.replaceAll("_", " "),
         item.answer,
       );
       if (item.memory_save) {
@@ -1025,6 +1069,18 @@ function renderHistory(task) {
         entry.append(receipt);
       }
       history.append(entry);
+    }
+    if (item.generation && (item.role !== "chat" || item.task_chat_message)) {
+      const generation = item.generation;
+      const requested = generation.model || "provider default";
+      const reported = generation.reported_model;
+      history.children[history.children.length - 1]?.append(
+        el(
+          "small",
+          `${generation.backend} · Requested: ${requested}${reported ? ` · Reported: ${reported}` : " · Provider did not report a model ID"}`,
+          "generation-receipt muted",
+        ),
+      );
     }
   }
   if (pending) {
@@ -1136,8 +1192,13 @@ function renderTask(task, running) {
   $("execution-mode").disabled = running;
   const prompt = task.prompt || {},
     actions = prompt.actions || [],
-    messageActions = actions.filter((action) => textActions.includes(action)),
+    messageActions = actions.some((action) => textActions.includes(action))
+      ? actions.filter((action) => textActions.includes(action))
+      : task.can_task_chat
+        ? ["task_chat"]
+        : [],
     key = JSON.stringify([
+      messageActions,
       task.task_id,
       task.stage,
       prompt,
@@ -1192,13 +1253,6 @@ function renderTask(task, running) {
   $("export-task").disabled = running || task.checks_in_task;
   $("task-checks").hidden = !task.can_run_checks;
   $("task-checks").disabled = running;
-  $("task-chat").hidden = !task.can_task_chat;
-  $("task-chat-send").disabled = running;
-  $("task-chat-status").textContent = running
-    ? state.job?.operation === "task_chat"
-      ? "The model is reading this task and preparing a reply…"
-      : "Wait for the current operation to finish, or stop it before chatting."
-    : "Replies appear in the conversation above. Ctrl/⌘ + Enter sends.";
   renderWorktree(task);
   renderHistory(task);
   if (key !== packetKey) {
@@ -1425,9 +1479,9 @@ function renderTask(task, running) {
       $("findings").append(label);
     }
   }
-  $("composer").hidden = !actions.length && !running;
+  $("composer").hidden = !messageActions.length && !running;
   const chatting = task.stage === "chat";
-  $("composer-label").textContent = chatting ? "Message" : "Your instructions";
+  $("composer-label").textContent = chatting ? "Message" : "Message the agent";
   $("message").placeholder = chatting
     ? "Ask a question or continue the conversation."
     : "Ask a follow-up or describe what should change.";
@@ -1498,14 +1552,14 @@ async function respond(action) {
   if (submitting || state?.job?.running) return;
   const text = $("message").value;
   if (
-    [...textActions, "dismiss", "accept_red"].includes(action) &&
+    [...textActions, "task_chat", "dismiss", "accept_red"].includes(action) &&
     !text.trim()
   )
     throw new Error("Add your instructions or reason before sending.");
   const ids = [...$("findings").querySelectorAll("input:checked")].map(
     (n) => n.value,
   );
-  if (textActions.includes(action) && text.trim()) {
+  if ([...textActions, "task_chat"].includes(action) && text.trim()) {
     pendingMessage = {
       task_id: selected,
       text,
@@ -1515,14 +1569,18 @@ async function respond(action) {
     renderHistory(state.task);
   }
   try {
-    await command({
-      command: "respond",
-      task_id: selected,
-      action,
-      text,
-      token: state.task.prompt.approval_token,
-      finding_ids: ids,
-    });
+    await command(
+      action === "task_chat"
+        ? { command: "task_chat", task_id: selected, text }
+        : {
+            command: "respond",
+            task_id: selected,
+            action,
+            text,
+            token: state.task.prompt.approval_token,
+            finding_ids: ids,
+          },
+    );
     if (pendingMessage) pendingMessage.status = "Sent · waiting for the agent";
     if ($("message").value === text) $("message").value = "";
   } catch (e) {
@@ -2121,41 +2179,6 @@ $("new-task").onclick = () =>
 $("refresh").onclick = () => guard(refresh);
 $("task-checks").onclick = () =>
   guard(() => command({ command: "task_checks", task_id: selected }));
-async function sendTaskChat() {
-  const text = $("task-chat-message").value;
-  if (!text.trim()) throw new Error("Enter a question about this task.");
-  const taskId = selected;
-  pendingMessage = {
-    task_id: taskId,
-    text,
-    after: (state.task.messages || []).length,
-    status: "Sending task question…",
-  };
-  renderHistory(state.task);
-  try {
-    await command({ command: "task_chat", task_id: taskId, text });
-    if (pendingMessage) pendingMessage.status = "Sent · waiting for the agent";
-    if (selected === taskId && $("task-chat-message").value === text)
-      $("task-chat-message").value = "";
-  } catch (error) {
-    if (pendingMessage)
-      pendingMessage.status = "Not sent · review the error and retry";
-    throw error;
-  } finally {
-    if (state?.task) renderHistory(state.task);
-  }
-}
-$("task-chat-send").onclick = () => guard(sendTaskChat);
-$("task-chat-message").onkeydown = (e) => {
-  if (
-    e.key === "Enter" &&
-    (e.ctrlKey || e.metaKey) &&
-    !$("task-chat-send").disabled
-  ) {
-    e.preventDefault();
-    $("task-chat-send").click();
-  }
-};
 $("latest-message").onclick = () => {
   $("history").scrollTop = $("history").scrollHeight;
 };

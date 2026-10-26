@@ -1530,3 +1530,12 @@ aside .local-dot {
   color: var(--info);
   background: var(--info-bg);
 }
+
+#composer {
+  margin-top: 18px;
+}
+.generation-receipt {
+  display: block;
+  margin-top: 12px;
+  font-size: 11px;
+}

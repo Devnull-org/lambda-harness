@@ -640,38 +640,6 @@
           <div class="button-row">
             <button id="task-checks" hidden>Run all checks and tests</button>
           </div>
-          <section id="composer" hidden>
-            <div class="compose-top">
-              <label id="composer-label" for="message">Your instructions</label
-              ><button id="edit-previous" class="quiet" hidden>
-                Edit previous message
-              </button>
-            </div>
-            <textarea
-              id="message"
-              rows="5"
-              placeholder="Ask a follow-up or describe what should change."
-            ></textarea>
-            <div id="findings"></div>
-            <div class="form-footer">
-              <div>
-                <select
-                  id="message-action"
-                  aria-label="Message action"
-                  hidden
-                ></select
-                ><small class="muted"
-                  >Enter adds a line · Ctrl/⌘ + Enter sends</small
-                >
-              </div>
-              <div class="composer-buttons">
-                <button id="composer-stop" class="stop" hidden>
-                  ■ Stop model
-                </button>
-                <button id="send" class="primary">Send →</button>
-              </div>
-            </div>
-          </section>
           <div id="actions" class="button-row"></div>
           <div class="task-footer">
             <button id="resume" class="quiet">Resume</button
@@ -724,29 +692,37 @@
           </div>
           <small id="reply-model-status" class="muted" role="status"></small>
         </div>
-        <section
-          id="task-chat"
-          class="panel"
-          hidden
-          aria-labelledby="task-chat-title"
-        >
-          <h3 id="task-chat-title">Chat about this task</h3>
-          <p class="muted">
-            Ask about the conversation, current changes, or results. Chat leaves
-            the current workflow step unchanged.
-          </p>
-          <label for="task-chat-message">Your question</label>
-          <textarea
-            id="task-chat-message"
-            rows="3"
-            placeholder="Suggest a commit message for this task’s changes."
-          ></textarea>
-          <div class="button-row">
-            <button id="task-chat-send" class="primary" type="button">
-              Ask about this task
+        <section id="composer" hidden>
+          <div class="compose-top">
+            <label id="composer-label" for="message">Your instructions</label
+            ><button id="edit-previous" class="quiet" hidden>
+              Edit previous message
             </button>
           </div>
-          <p id="task-chat-status" class="muted" role="status"></p>
+          <textarea
+            id="message"
+            rows="5"
+            placeholder="Ask a follow-up or describe what should change."
+          ></textarea>
+          <div id="findings"></div>
+          <div class="form-footer">
+            <div>
+              <select
+                id="message-action"
+                aria-label="Message action"
+                hidden
+              ></select
+              ><small class="muted"
+                >Enter adds a line · Ctrl/⌘ + Enter sends</small
+              >
+            </div>
+            <div class="composer-buttons">
+              <button id="composer-stop" class="stop" hidden>
+                ■ Stop model
+              </button>
+              <button id="send" class="primary">Send →</button>
+            </div>
+          </div>
         </section>
         <div id="packet" class="panel"></div>
         <section id="exploration-notes" class="panel" hidden></section>

@@ -218,6 +218,9 @@ class CommandAgent:
             )
         label = "availability check" if context.get("backend_check") else role.replace("_", " ")
         if self.progress:
+            self.progress(
+                f"Backend {self.name!r}: model {self.model or 'provider default'} for {label}"
+            )
             self.progress(f"Backend {self.name!r}: waiting for {label} (timeout {self.timeout:g}s)")
             if self.cancellation and self.cancellation.previous_handler is not None:
                 self.progress("Press Ctrl+C to stop generation and revise your instructions.")
