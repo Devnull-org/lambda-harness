@@ -1353,7 +1353,7 @@ def test_automatic_backend_choice_is_restored_after_restarting(browser_app):
     app.selected_backend = "codex"
     reopened = LocalApp(app.args)
     try:
-        assert app.state()["backend"] == "codex"
+        assert app.state()["backend"] == "auto"  # Another task cannot change the project default.
         assert reopened.project()["backend"] == "auto"
         assert reopened.project()["backend_origin"] == "project"
         assert reopened.state()["backend"] == "auto"
@@ -1635,3 +1635,78 @@ def test_task_chat_endpoint_keeps_saved_phase_and_returns_conversation(browser_a
     assert state["task"]["messages"][-1]["answer"] == "Suggested commit subject"
     assert state["task"]["can_task_chat"]
     assert not executor.calls
+
+
+def test_tasks_run_concurrently_with_isolated_models_worktrees_logs_and_stop(browser_app, tmp_path):
+    from lambda_harness.config import Backend
+
+    app, call, _, _ = browser_app
+    script = executable(
+        tmp_path,
+        "import json, sys, time\nfrom pathlib import Path\n"
+        "request = json.load(sys.stdin)\n"
+        "name = request['context']['request']\n"
+        f"root = Path({str(tmp_path)!r})\n"
+        "(root / (name + '.request')).write_text(json.dumps(request))\n"
+        "while not (root / (name + '.release')).exists(): time.sleep(.01)\n"
+        "print(json.dumps({'answer': name + ' completed', 'references': []}))\n",
+    )
+    app.settings.backends["test"] = Backend(command=[script], input_format="json")
+    for name in ("alpha", "beta"):
+        code, _ = call(
+            "/api/command",
+            {
+                "command": "chat",
+                "task_id": name,
+                "request": name,
+                "base": "main",
+                "backend": "test",
+                "model": name + "-model",
+            },
+        )
+        assert code == 202
+        wait_for((tmp_path / (name + ".request")).exists)
+    alpha = call("/api/state?task=alpha")[1]
+    beta = call("/api/state?task=beta")[1]
+    assert alpha["job"]["task_id"] == "alpha" and beta["job"]["task_id"] == "beta"
+    assert alpha["job"]["running"] and beta["job"]["running"]
+    assert alpha["can_stop"] and beta["can_stop"]
+    assert alpha["task"]["worktree"] != beta["task"]["worktree"]
+    for name, state, other in [("alpha", alpha, "beta"), ("beta", beta, "alpha")]:
+        assert state["task"]["model_selection"]["model"] == name + "-model"
+        assert name + "-model" in "\n".join(state["job"]["log"])
+        assert other + "-model" not in "\n".join(state["job"]["log"])
+        request = json.loads((tmp_path / (name + ".request")).read_text())
+        assert request["model"] == name + "-model"
+        assert request["context"]["request"] == name
+    assert call("/api/command", {"command": "resume", "task_id": "alpha"})[0] == 400
+    assert call("/api/stop", {})[0] == 400  # Ambiguous stop cannot cancel a random task.
+    assert not call("/api/stop", {"task_id": "alpha", "job_id": "stale"})[1]["stopping"]
+    assert call("/api/stop", {"task_id": "beta", "job_id": beta["job"]["id"]})[1]["stopping"]
+    wait_for(lambda: not call("/api/state?task=beta")[1]["job"]["running"])
+    assert call("/api/state?task=beta")[1]["task"]["stage"] == "agent_paused"
+    alpha = call("/api/state?task=alpha")[1]
+    assert alpha["job"]["running"] and not alpha["stopping"]
+    assert call("/api/state?task=unstarted")[1]["job"] is None
+    assert call("/api/state?task=unstarted")[1]["project_running"]
+    # Project-wide mutations stay blocked even though the latest job (beta) has finished.
+    assert call("/api/backend", {"backend": "test"})[0] == 400
+    with pytest.raises(ValueError, match="current operation"):
+        app.reserve_handoff("export")
+    original_beta = call("/api/state?task=beta")[1]["task"]
+    (tmp_path / "beta.release").touch()
+    assert call("/api/command", {"command": "restart", "task_id": "beta"})[0] == 202
+    wait_for(lambda: not call("/api/state?task=beta")[1]["job"]["running"])
+    restarted = call("/api/state?task=beta")[1]["job"]
+    assert restarted["error"] is None
+    assert restarted["result"]["task_id"] == "beta-restart-1"
+    assert restarted["result"]["worktree"] != original_beta["worktree"]
+    assert call("/api/state?task=beta")[1]["task"] == original_beta
+    assert call("/api/state?task=alpha")[1]["job"]["running"]
+    (tmp_path / "alpha.release").touch()
+    wait_for(lambda: not call("/api/state?task=alpha")[1]["job"]["running"])
+    alpha = call("/api/state?task=alpha")[1]
+    assert alpha["job"]["error"] is None
+    assert alpha["task"]["messages"][-1]["answer"] == "alpha completed"
+    assert not alpha["project_running"]
+    assert "alpha completed" not in json.dumps(call("/api/state?task=beta")[1]["task"]["messages"])

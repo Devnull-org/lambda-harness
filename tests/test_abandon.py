@@ -167,3 +167,20 @@ def test_abandon_does_not_remove_a_moved_worktree(rig, repository, tmp_path):
     with pytest.raises(ValueError, match="another worktree"):
         harness.abandon_plan("discard")
     assert (moved / SOURCE).exists()
+
+
+def test_task_locks_allow_other_tasks_but_exclude_same_task_and_project(rig):
+    harness, _, _ = rig
+    with harness._lock("first"):
+        with harness._lock("second"):
+            pass
+        with pytest.raises(RuntimeError, match="Another harness process"):
+            with harness._lock("first"):
+                pass
+        with pytest.raises(RuntimeError, match="Another harness process"):
+            with harness._lock():
+                pass
+    with harness._lock():
+        with pytest.raises(RuntimeError, match="Another harness process"):
+            with harness._lock("second"):
+                pass

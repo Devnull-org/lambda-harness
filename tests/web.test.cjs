@@ -730,7 +730,7 @@ async function app({
     context,
   );
   await settle();
-  vm.runInContext("selected = 'example'", context);
+  vm.runInContext("selected = 'example'; if (state) render()", context);
   return {
     gesture: (name = "pointerdown") => listeners[name]?.(),
     elements,
@@ -972,7 +972,7 @@ for (const reviewers of ["documentation", "all"])
     ui.fetch(async () =>
       response(
         snapshot({
-          ...task(),
+          ...task("review-docs"),
           task_kind: "review",
           stage: "standalone_review",
           prompt: { reviews, actions: ["question", "done"] },
@@ -1120,7 +1120,7 @@ test("general chat submits a chat task and renders plain conversation without ap
   assert.equal(posted.command, "chat");
   assert.equal(posted.request, "Explain pure functions");
   assert(!("walkthrough" in posted));
-  ui.run(`state.task.stage = "chat"; state.task.task_kind = "chat";
+  ui.run(`state.task.task_id = "conversation"; state.task.stage = "chat"; state.task.task_kind = "chat";
     state.task.messages = [{role: "chat", answer: "A pure function has no effects", references: []}, {text: "Tell me more"}, {role: "chat", answer: "Results depend on inputs", references: ["Example.hs:3"]}];
     state.task.prompt = {actions: ["answer"], references: ["Example.hs:3"]}; render();`);
   assert.match(
@@ -1517,7 +1517,7 @@ for (const kind of ["model", "validation"]) {
   });
 }
 
-test("stop remains available for the running task when viewing another conversation", async () => {
+test("another task does not show activity or block this conversation", async () => {
   const current = snapshot();
   current.job = {
     id: "other",
@@ -1530,9 +1530,10 @@ test("stop remains available for the running task when viewing another conversat
   const ui = await app({ fetcher: async () => response(current) });
   ui.run("render()");
   assert.equal(ui.elements.get("composer-stop").hidden, true);
-  assert.equal(ui.elements.get("stop").hidden, false);
-  assert.equal(ui.elements.get("stop").disabled, false);
-  assert.match(ui.elements.get("activity-label").textContent, /other task/);
+  assert.equal(ui.elements.get("activity").hidden, true);
+  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.get("send").disabled, false);
+  assert.equal(ui.elements.get("new-task").disabled, false);
 });
 
 test("thinking status handles connection loss, other tasks, and backend errors", async () => {
@@ -3155,4 +3156,136 @@ test("an unsent model selection survives a browser reload", async () => {
     JSON.parse(second.elements.get("reply-chat-model").value).model,
     "careful",
   );
+});
+
+test("task switches isolate activity, drafts, completion, model choices and stop requests", async () => {
+  const jobs = ["example", "second"].map((task_id) => ({
+    id: task_id + "-job",
+    task_id,
+    running: true,
+    operation: "respond",
+    log: [task_id + " log"],
+  }));
+  const posts = [];
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/stop") {
+        posts.push(JSON.parse(options.body));
+        return response({ stopping: true });
+      }
+      const id = path.includes("task=second") ? "second" : "example";
+      return response({
+        ...snapshot(task(id)),
+        jobs,
+        job: jobs.find((j) => j.task_id === id),
+        project_running: jobs.some((j) => j.running),
+        can_stop: true,
+        tasks: [task("example"), task("second")],
+      });
+    },
+  });
+  ui.elements.get("message").value = "Draft for first";
+  ui.run(
+    'rememberModel(modelScope(), JSON.stringify({backend:"test", model:"first-model"}))',
+  );
+  await ui.run('selectTask("second"); refresh()');
+  assert.equal(ui.elements.get("message").value, "");
+  assert.equal(ui.elements.get("log").textContent, "second log");
+  ui.elements.get("message").value = "Draft for second";
+  ui.run(
+    'rememberModel(modelScope(), JSON.stringify({backend:"test", model:"second-model"}))',
+  );
+  await ui.elements.get("composer-stop").onclick();
+  assert.deepEqual(posts, [{ task_id: "second", job_id: "second-job" }]);
+  jobs[0].running = false;
+  jobs[0].result = task("example");
+  await ui.run("refresh()");
+  assert.equal(ui.run("selected"), "second");
+  assert.equal(ui.elements.get("message").value, "Draft for second");
+  await ui.run('selectTask("example"); refresh()');
+  assert.equal(ui.elements.get("message").value, "Draft for first");
+  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.get("send").disabled, false);
+  assert.equal(ui.elements.get("log").textContent, "example log");
+  assert.equal(
+    JSON.parse(ui.run("modelChoices.get(modelScope())")).model,
+    "first-model",
+  );
+  assert.match(ui.elements.get("tasks").textContent, /second.*Working/s);
+});
+
+test("another task can receive a message while the first is running", async () => {
+  const current = snapshot();
+  current.jobs = [
+    { id: "other-job", task_id: "other", running: true, log: [] },
+  ];
+  current.project_running = true;
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({ accepted: true });
+      }
+      return response(current);
+    },
+  });
+  ui.elements.get("message").value = "Explore this task";
+  await ui.run('respond("question")');
+  assert.equal(posted.task_id, "example");
+  assert.equal(posted.text, "Explore this task");
+  assert.equal(ui.elements.get("activity").hidden, true);
+  assert.equal(ui.elements.get("export-project").disabled, true);
+});
+
+test("switching tasks hides stale activity before the new snapshot arrives", async () => {
+  const first = {
+    ...snapshot(),
+    selected_task_id: "example",
+    job: {
+      id: "first-job",
+      task_id: "example",
+      running: true,
+      log: ["First task log"],
+    },
+  };
+  first.jobs = [
+    first.job,
+    {
+      id: "second-job",
+      task_id: "second",
+      running: true,
+      log: ["Second task log"],
+    },
+  ];
+  const ui = await app({ fetcher: async () => response(first) });
+  ui.run('selectTask("second"); showPage("workspace")');
+  assert.equal(ui.elements.get("activity").hidden, true);
+  assert.equal(ui.elements.get("work").hidden, true);
+});
+
+test("a delayed message submission cannot clear another task draft or show its error there", async () => {
+  let rejectSend;
+  const ui = await app({
+    fetcher: async (path) => {
+      if (path === "/api/command")
+        return new Promise((_, reject) => {
+          rejectSend = reject;
+        });
+      return response(
+        snapshot(task(path.includes("task=second") ? "second" : "example")),
+      );
+    },
+  });
+  ui.elements.get("message").value = "First task question";
+  const sending = ui.run('guard(() => respond("question"))');
+  await ui.run('selectTask("second"); refresh()');
+  ui.elements.get("message").value = "Second task draft";
+  rejectSend(new Error("First task failed to send"));
+  await sending;
+  assert.equal(ui.elements.get("message").value, "Second task draft");
+  assert.equal(ui.elements.get("error").hidden, true);
+  await ui.run('selectTask("example"); refresh()');
+  assert.equal(ui.elements.get("message").value, "First task question");
+  assert.match(ui.elements.get("error").textContent, /First task failed/);
 });

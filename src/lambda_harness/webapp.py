@@ -42,8 +42,11 @@ class LocalApp:
         self.args = args
         self.settings = load_settings(args.config)
         self.token = secrets.token_urlsafe(32)
-        self.lock = threading.Lock()
-        self.job = None
+        self.lock = threading.RLock()
+        self.job = None  # Latest job, retained for project-level callers.
+        self.jobs = {}
+        self.cancellations = {}
+        self.workers = []
         self.worker = None
         self.cancellation = ModelCancellation()
         self.shutdown = threading.Event()
@@ -91,7 +94,7 @@ class LocalApp:
 
     def select_agent_repository(self, body):
         with self.lock:
-            if self.job and self.job["running"]:
+            if self.running():
                 raise ValueError("Wait for the current operation before changing repositories")
             if not isinstance(body.get("repository"), str) or not body["repository"].strip():
                 raise ValueError("Enter the path to an agent repository checkout")
@@ -103,7 +106,7 @@ class LocalApp:
 
     def assign_agent(self, body):
         with self.lock:
-            if self.job and self.job["running"]:
+            if self.running():
                 raise ValueError("Wait for the current operation before changing agents")
             if not isinstance(body.get("role"), str) or (
                 body.get("agent_id") is not None and not isinstance(body["agent_id"], str)
@@ -158,7 +161,7 @@ class LocalApp:
 
     def project_change(self, operation, body):
         with self.lock:
-            if self.job and self.job["running"]:
+            if self.running():
                 raise ValueError("Wait for the current operation before changing project settings")
             if operation == "backend":
                 name = body.get("backend")
@@ -208,7 +211,29 @@ class LocalApp:
             finally:
                 harness.close()
 
-    def harness(self, agent=None):
+    def running(self):
+        with self.lock:
+            return bool((self.job or {}).get("running")) or any(
+                job["running"] for job in self.jobs.values()
+            )
+
+    def stop(self, task_id=None, job_id=None):
+        if any(value is not None and not isinstance(value, str) for value in (task_id, job_id)):
+            raise ValueError("Choose a task and operation to stop")
+        with self.lock:
+            running = list(
+                {job["id"]: job for job in self.jobs.values() if job["running"]}.values()
+            )
+            if task_id is None:
+                if len(running) > 1:
+                    raise ValueError("Choose the task to stop")
+                task_id = running[0]["task_id"] if running else None
+            job = self.jobs.get(task_id)
+            if not job or not job["running"] or (job_id and job["id"] != job_id):
+                return False
+            return self.cancellations[task_id].stop()
+
+    def harness(self, agent=None, *, cancellation=None, progress=None):
         return Harness(
             self.args.repo,
             self.args.state_dir,
@@ -217,23 +242,37 @@ class LocalApp:
                 nix_flake=self.args.nix_flake,
                 timeout=self.args.check_timeout,
                 cancel=self.shutdown,
-                cancellation=self.cancellation,
+                cancellation=cancellation or self.cancellation,
             ),
             unsigned_commits=self.args.unsigned_commits,
-            progress=self.progress,
+            progress=progress or self.progress,
             validation=self.settings.validation,
             agent_repository=self.agent_repository,
             pause_on_error=True,
         )
 
-    def progress(self, message):
+    def progress(self, message, job=None):
         with self.lock:
-            if self.job is not None:
-                self.job["log"] = [*self.job["log"], message][-200:]
+            target = job if job is not None else self.job
+            if target is not None:
+                target["log"] = [*target["log"], message][-200:]
 
     def state(self, task_id=None):
         with self.lock:
-            job = json.loads(json.dumps(self.job))
+            selected_job = self.jobs.get(task_id) if task_id is not None else self.job
+            job = copy.deepcopy(selected_job)
+            # Other tasks need sidebar status only; their conversations and logs stay scoped.
+            jobs = [
+                {
+                    **{key: job[key] for key in ("id", "task_id", "running", "error")},
+                    "scope_task_id": name,
+                }
+                for name, job in self.jobs.items()
+            ]
+            cancellation = (
+                self.cancellations.get(task_id) if task_id is not None else self.cancellation
+            )
+            project_running = self.running()
         harness = self.harness()
         try:
             harness.graph.checkpointer.setup()
@@ -277,18 +316,21 @@ class LocalApp:
                     task["model_selection"] = preferences.task_model(task_id)
         finally:
             harness.close()
-        active = self.cancellation.active
+        active = cancellation.active if cancellation else None
         return {
             "project": self.identity,
             "repository": str(self.args.repo),
             "base": git(self.args.repo, "branch", "--show-current") or "HEAD",
             "tasks": tasks,
             "task": task,
+            "selected_task_id": task_id,
             "job": job,
+            "jobs": jobs,
+            "project_running": project_running,
             "can_stop": active is not None and not active.is_set(),
             "stopping": active is not None and active.is_set(),
-            "activity_kind": self.cancellation.kind,
-            "backend": self.selected_backend or self.settings.default_backend,
+            "activity_kind": cancellation.kind if cancellation else None,
+            "backend": self.project_backend or self.settings.default_backend,
         }
 
     def models(self, refresh=False):
@@ -384,7 +426,7 @@ class LocalApp:
                 or not all(isinstance(item, str) for item in command[field])
             ):
                 raise ValueError(f"{field} must be a list of text entries")
-        backend = command.get("backend", self.selected_backend)
+        backend = command.get("backend", self.project_backend)
         if backend is not None and backend != "auto" and backend not in self.settings.backends:
             raise ValueError("Unknown backend")
         if command.get("model") is not None:
@@ -393,9 +435,14 @@ class LocalApp:
             if (backend or self.settings.default_backend) == "auto":
                 raise ValueError("Choose a model from a specific backend")
         with self.lock:
-            if self.job and self.job["running"]:
-                raise ValueError("An operation is already running; stop it before sending another")
-            self.job = {
+            if self.shutdown.is_set():
+                raise ValueError("This project was closed; reopen it before starting work")
+            if (self.job or {}).get("running") and self.job.get("handoff"):
+                raise ValueError("Wait for the project transfer to finish")
+            task_id = command["task_id"]
+            if self.jobs.get(task_id, {}).get("running"):
+                raise ValueError("This task is already running; stop it before sending another")
+            job = {
                 "id": secrets.token_hex(8),
                 "operation": command["command"],
                 "task_id": command["task_id"],
@@ -405,13 +452,23 @@ class LocalApp:
                 "error": None,
                 "selection": None,
             }
+            cancellation = ModelCancellation()
+            self.job = self.jobs[task_id] = job
+            self.cancellation = self.cancellations[task_id] = cancellation
             self.worker = threading.Thread(
-                target=self._run, args=(dict(command), backend), name="harness-web-task"
+                target=self._run,
+                args=(dict(command), backend, job, cancellation),
+                name=f"harness-web-{task_id}",
             )
+            self.workers = [worker for worker in self.workers if worker.is_alive()]
+            self.workers.append(self.worker)
             self.worker.start()
         return {"accepted": True}
 
-    def _run(self, command, backend):
+    def _run(self, command, backend, job, cancellation):
+        def progress(message):
+            self.progress(message, job)
+
         harness = None
         try:
             agent = RoutedAgent(
@@ -419,21 +476,21 @@ class LocalApp:
                 backend=backend,
                 model=command.get("model", self.args.model),
                 timeout=self.args.agent_timeout,
-                progress=self.progress,
-                cancellation=self.cancellation,
+                progress=progress,
+                cancellation=cancellation,
             )
             action, task_id = command["command"], command["task_id"]
             if self.shutdown.is_set():
                 raise SelectionCancelled
             source = None
             if action == "review":
-                with self.cancellation.request() as cancel:
+                with cancellation.request() as cancel:
                     source = resolve_review(
                         self.args.repo,
                         command.get("base", ""),
                         command.get("head", ""),
                         cancel=cancel,
-                        progress=self.progress,
+                        progress=progress,
                     )
             if action not in {"abandon", "review_action"} and not (
                 action == "respond"
@@ -441,8 +498,7 @@ class LocalApp:
                 in {"save_agent", "continue_handoff", "run_checks", "return_to_task"}
             ):
                 selected = select_backend(agent, self.args.repo)
-                self.selected_backend = selected
-                self.progress(f"Selected backend: {selected}")
+                progress(f"Selected backend: {selected}")
                 with ProjectSettings(
                     state_directory(self.args.repo, self.args.state_dir)
                 ) as preferences:
@@ -451,7 +507,7 @@ class LocalApp:
                     )
             if self.shutdown.is_set():
                 raise SelectionCancelled
-            harness = self.harness(agent)
+            harness = self.harness(agent, cancellation=cancellation, progress=progress)
             if action == "agent_builder":
                 result = harness.start_agent_builder(
                     task_id, command.get("request", ""), agent_id=command.get("agent_id")
@@ -495,7 +551,7 @@ class LocalApp:
             elif action == "resume":
                 result = harness.resume(task_id, retry_backend=True)
             elif action == "review_action":
-                with self.cancellation.request() as cancel:
+                with cancellation.request() as cancel:
                     result = harness.review_action(
                         task_id,
                         command.get("action"),
@@ -524,23 +580,27 @@ class LocalApp:
                     raise ValueError("Type the task name to confirm deletion")
                 result = harness.abandon(task_id, confirmation_token=command.get("token"))
             with self.lock:
-                self.job["result"] = result
-                self.job["task_id"] = result["task_id"]
+                job["result"] = result
+                if result["task_id"] != command["task_id"]:
+                    job["origin_task_id"] = command["task_id"]
+                    job["task_id"] = result["task_id"]
+                    self.jobs.setdefault(result["task_id"], job)
+                    self.cancellations.setdefault(result["task_id"], cancellation)
         except SelectionRequired as error:
             with self.lock:
-                self.job["selection"] = error.view()
-                self.job["pending_command"] = command
+                job["selection"] = error.view()
+                job["pending_command"] = command
         except SelectionCancelled:
             with self.lock:
-                self.job["error"] = "Backend selection stopped. No new task was started."
+                job["error"] = "Backend selection stopped. No new task was started."
         except Exception as error:
             with self.lock:
-                self.job["error"] = str(error)
+                job["error"] = str(error)
         finally:
             if harness:
                 harness.close()
             with self.lock:
-                self.job["running"] = False
+                job["running"] = False
 
     def abandon_plan(self, task_id):
         if not task_id:
@@ -555,11 +615,12 @@ class LocalApp:
         with self.lock:
             if self.shutdown.is_set():
                 raise ValueError("This project was closed; reopen it before transferring work")
-            if self.job and self.job["running"]:
+            if self.running():
                 raise ValueError("Stop or finish the current operation before transferring work")
             self.job = {
                 "id": secrets.token_hex(8),
                 "task_id": "project handoff",
+                "handoff": True,
                 "running": True,
                 "log": [f"Preparing handoff {operation}…"],
                 "result": None,
@@ -595,9 +656,13 @@ class LocalApp:
 
     def close(self):
         self.shutdown.set()
-        self.cancellation.close()
-        if self.worker:
-            self.worker.join()
+        with self.lock:
+            cancellations = list(self.cancellations.values())
+            workers = list(self.workers)
+        for cancellation in cancellations:
+            cancellation.close()
+        for worker in workers:
+            worker.join()
 
 
 class ProjectHub:
@@ -623,9 +688,7 @@ class ProjectHub:
                     **project,
                     "available": Path(project["repository"]).is_dir(),
                     "running": bool(
-                        (self.apps[project["id"]].job or {}).get("running")
-                        if project["id"] in self.apps
-                        else False
+                        self.apps[project["id"]].running() if project["id"] in self.apps else False
                     ),
                 }
                 for project in self.registry.list()
@@ -659,7 +722,7 @@ class ProjectHub:
             app = self.apps.get(project_id)
             if app:
                 with app.lock:
-                    if app.job and app.job["running"]:
+                    if app.running():
                         raise ValueError(
                             "This project has running work. "
                             "Stop it or wait before removing the project."
@@ -861,7 +924,7 @@ def create_server(app, port=8765, *, phone=None):
             elif self.path == "/api/agents/assign":
                 self.send(200, app.assign_agent(body))
             elif self.path == "/api/stop":
-                self.send(200, {"stopping": app.cancellation.stop()})
+                self.send(200, {"stopping": app.stop(body.get("task_id"), body.get("job_id"))})
             elif self.path in {
                 "/api/context",
                 "/api/context/use",

@@ -13,7 +13,7 @@ from .workspace import save_json
 
 class CheckRunner:
     def start_checks(self, task_id, request, *, base="HEAD"):
-        with self._lock():
+        with self._lock(task_id):
             return self._start(
                 task_id,
                 request or "Discover and run all repository checks and test suites.",
@@ -24,7 +24,7 @@ class CheckRunner:
 
     def run_task_checks(self, task_id):
         """Use the selected task's actual worktree; retain its workflow for returning later."""
-        with self._lock():
+        with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
             if self.graph.get_state(self._config(task_id)).next:
                 raise ValueError("Finish or resolve the current step before starting a check run")

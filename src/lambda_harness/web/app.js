@@ -56,7 +56,7 @@ function notifyPermissions(snapshot) {
   for (const task of snapshot.tasks || []) {
     if (
       !(task.permission_request || task.attention_request) ||
-      (snapshot.job?.running && snapshot.job.task_id === task.task_id)
+      jobFor(task.task_id, snapshot)?.running
     )
       continue;
     const key = JSON.stringify([
@@ -98,14 +98,14 @@ collapseMobileNavigation();
 let selected = null,
   state = null,
   timer = null,
-  seenJob = null,
+  seenJob = new Set(),
   deletePlan = null,
   packetKey = "",
   historyKey = "",
   historyTask = null,
   pendingMessage = null,
   submitting = false,
-  stopPending = false,
+  stoppingJobs = new Set(),
   refreshId = 0,
   connectionError = null;
 let memoryLoaded = false,
@@ -269,11 +269,13 @@ function error(message) {
   $("error").hidden = !message;
 }
 async function guard(action) {
+  const scope = taskScope();
   try {
     error("");
     await action();
   } catch (e) {
-    error(e.message);
+    taskErrors.set(scope, e.message);
+    if (scope === taskScope()) error(e.message);
   }
 }
 async function api(path, body) {
@@ -455,7 +457,7 @@ function renderReviews(parent, reviews) {
               finding_id: finding.id,
             }),
           );
-          control.disabled = submitting || !!state?.job?.running;
+          control.disabled = submitting || !!currentJob()?.running;
           card.append(control);
         }
       }
@@ -571,7 +573,7 @@ function renderModelPicker() {
     picker.dataset.options = optionKey;
   }
   picker.value = chosen || "";
-  picker.disabled = submitting || !!state.job?.running;
+  picker.disabled = submitting || !!currentJob()?.running;
   $(`${prefix}-refresh-models`).disabled = modelLoadingKey === key;
   const problems = catalogs
     .filter((c) => c.error || c.notice)
@@ -592,11 +594,64 @@ for (const prefix of ["new", "reply"]) {
   };
   $(`${prefix}-refresh-models`).onclick = () => loadModels(true);
 }
+function jobFor(taskId, snapshot = state) {
+  if (!snapshot || !taskId) return null;
+  if (
+    snapshot.job &&
+    (!snapshot.job.task_id ||
+      snapshot.job.task_id === taskId ||
+      snapshot.job.origin_task_id === taskId)
+  )
+    return snapshot.job;
+  return (
+    snapshot.jobs?.find(
+      (job) => (job.scope_task_id || job.task_id) === taskId,
+    ) || null
+  );
+}
+function currentJob() {
+  if (
+    state?.selected_task_id !== undefined &&
+    state.selected_task_id !== selected
+  )
+    return null;
+  return jobFor(selected);
+}
+function stopPending() {
+  return stoppingJobs.has(currentJob()?.id);
+}
+function projectRunning() {
+  return (
+    state?.project_running ??
+    (state?.jobs || [state?.job]).some((job) => job?.running)
+  );
+}
+const taskErrors = new Map();
+const taskDrafts = new Map();
+const taskPendingMessages = new Map();
+function taskScope(taskId = selected) {
+  return JSON.stringify([
+    requestedProject || activeProject?.id || state?.repository,
+    taskId,
+  ]);
+}
+function selectTask(taskId) {
+  if (selected === taskId) return;
+  taskDrafts.set(taskScope(), $("message").value);
+  taskPendingMessages.set(taskScope(), pendingMessage);
+  selected = taskId;
+  packetKey = "";
+  $("message").value = taskDrafts.get(taskScope()) || "";
+  pendingMessage = taskPendingMessages.get(taskScope()) || null;
+  error(taskErrors.get(taskScope()) || "");
+}
 async function command(body) {
   if (submitting) return;
-  if (state?.job?.running)
+  const originSelection = selected;
+  taskErrors.delete(taskScope());
+  if (jobFor(body.task_id)?.running)
     throw new Error(
-      "An operation is still running. Stop it before sending another.",
+      "This task is still running. Stop it before sending another.",
     );
   if (
     body.command === "resume" &&
@@ -646,11 +701,18 @@ async function command(body) {
         JSON.stringify({ backend: body.backend, model: body.model }),
       );
     if (
-      ["start", "explore", "review", "tests", "chat", "agent_builder"].includes(
-        body.command,
-      )
+      [
+        "start",
+        "explore",
+        "review",
+        "tests",
+        "chat",
+        "checks",
+        "agent_builder",
+      ].includes(body.command) &&
+      selected === originSelection
     ) {
-      selected = body.task_id;
+      selectTask(body.task_id);
       showPage("workspace");
       packetKey = "";
     }
@@ -691,7 +753,7 @@ async function refresh() {
     if (requestId === refreshId && taskId === selected)
       timer = setTimeout(
         refresh,
-        connectionError ? 2000 : state?.job?.running ? 700 : 3000,
+        connectionError ? 2000 : projectRunning() ? 700 : 3000,
       );
   }
 }
@@ -711,8 +773,10 @@ function render() {
     if (!reviewFromPR && !$("base").value) $("base").value = branchBase;
     baseInitialized = true;
   }
-  const running = !!state.job?.running;
+  const running = !!currentJob()?.running;
   const busy = running || submitting || handoffBusy || !!connectionError;
+  const projectBusy =
+    projectRunning() || submitting || handoffBusy || !!connectionError;
   $("tasks").replaceChildren();
   for (const task of state.tasks.filter(
     (item) => item.task_kind !== "agent_builder",
@@ -725,10 +789,7 @@ function render() {
     const item = button(
       task.task_id,
       async () => {
-        if (selected !== task.task_id) {
-          $("message").value = "";
-        }
-        selected = task.task_id;
+        selectTask(task.task_id);
         showPage("workspace");
         memoryPreviewId++;
         $("context-preview").replaceChildren();
@@ -740,9 +801,11 @@ function render() {
     item.append(
       el(
         "small",
-        running && state.job.task_id === task.task_id
+        jobFor(task.task_id)?.running
           ? "Working…"
-          : task.outcome?.title || stageLabel(task.stage),
+          : jobFor(task.task_id)?.error
+            ? "Operation stopped"
+            : task.outcome?.title || stageLabel(task.stage),
       ),
     );
     const remove = button(
@@ -751,7 +814,11 @@ function render() {
       "task-delete",
     );
     remove.ariaLabel = remove.title = "Delete task " + task.task_id;
-    remove.disabled = busy;
+    remove.disabled =
+      submitting ||
+      handoffBusy ||
+      !!connectionError ||
+      !!jobFor(task.task_id)?.running;
     row.append(item, remove);
     $("tasks").append(row);
   }
@@ -761,34 +828,40 @@ function render() {
     );
   renderPage();
   renderAgentDrafts();
-  agentControls(busy);
-  $("new-task").disabled = busy;
+  agentControls(projectBusy);
+  $("new-task").disabled = submitting || handoffBusy || !!connectionError;
   $("choose-backend").disabled = busy;
-  $("new-form").querySelector("button").disabled = busy;
-  $("save-backend").disabled = busy;
-  $("export-project").disabled = busy;
-  $("import-project").disabled = busy;
-  $("delete-confirm").disabled = busy;
-  renderMemory(busy);
+  $("new-form").querySelector("button").disabled =
+    submitting || handoffBusy || !!connectionError;
+  $("save-backend").disabled = projectBusy;
+  $("export-project").disabled = projectBusy;
+  $("import-project").disabled = projectBusy;
+  $("delete-confirm").disabled =
+    submitting ||
+    handoffBusy ||
+    !!connectionError ||
+    !!jobFor(deletePlan?.task_id)?.running;
+  renderMemory(projectBusy);
   renderModelPicker();
-  if (state.task) renderTask(state.task, busy);
-  $("activity").hidden = page !== "workspace" || !state.job;
+  if (state.task?.task_id === selected) renderTask(state.task, busy);
+  $("activity").hidden = page !== "workspace" || !currentJob();
   $("activity").dataset.running = String(running);
   $("activity-spinner").hidden = !running || !!connectionError;
-  $("composer-stop").hidden = !running || state.job.task_id !== selected;
+  $("composer-stop").hidden = !running || currentJob().task_id !== selected;
+  $("stop").hidden = !running;
   for (const id of ["stop", "composer-stop"]) {
-    $(id).disabled = !state.can_stop || stopPending || !!connectionError;
+    $(id).disabled = !state.can_stop || stopPending() || !!connectionError;
     $(id).textContent =
-      state.stopping || stopPending
+      state.stopping || stopPending()
         ? "Stopping…"
         : state.activity_kind === "validation"
           ? "■ Stop checks"
-          : state.job?.operation === "review_action"
+          : currentJob()?.operation === "review_action"
             ? "■ Stop action"
             : "■ Stop model";
   }
-  if (state.job) {
-    const job = state.job;
+  if (currentJob()) {
+    const job = currentJob();
     $("activity-label").textContent = running
       ? "Working on " + job.task_id
       : job.error
@@ -802,8 +875,8 @@ function render() {
         "Operation finished.";
     $("log").textContent = job.log.join("\n");
     $("stop").hidden = !running;
-    if (!running && seenJob !== job.id) {
-      seenJob = job.id;
+    if (!running && !seenJob.has(job.id)) {
+      seenJob.add(job.id);
       if (job.result?.stage === "agent_ready") guard(loadAgents);
       if (job.error) error(job.error);
       if (job.result?.stage === "abandoned") {
@@ -815,15 +888,19 @@ function render() {
           guard(refresh);
           return;
         }
-      } else if (job.result && selected !== job.result.task_id) {
-        selected = job.result.task_id;
+      } else if (
+        job.result &&
+        job.origin_task_id === selected &&
+        selected !== job.result.task_id
+      ) {
+        selectTask(job.result.task_id);
         packetKey = "";
         guard(refresh);
         return;
       }
     }
   }
-  const selection = state.job?.selection;
+  const selection = currentJob()?.selection;
   $("selection").hidden = page !== "workspace" || !selection;
   if (selection) {
     $("selection-description").textContent = selection.available_backends.length
@@ -834,7 +911,7 @@ function render() {
       $("backend-choices").append(
         button(
           name,
-          () => command({ ...state.job.pending_command, backend: name }),
+          () => command({ ...currentJob().pending_command, backend: name }),
           "primary",
         ),
       );
@@ -845,13 +922,13 @@ function render() {
 }
 function responseProgress(taskId) {
   const sending = submitting && pendingMessage?.task_id === taskId;
-  const working = state?.job?.running && state.job.task_id === taskId;
+  const working = currentJob()?.running && currentJob().task_id === taskId;
   if (!sending && !working) return null;
   if (connectionError) return "Connection lost · reconnecting…";
-  if (state.stopping || stopPending) return "Stopping…";
+  if (state.stopping || stopPending()) return "Stopping…";
   if (!working) return "Sending…";
   if (state.activity_kind === "validation") return "Running checks…";
-  return state.job.operation === "review_action" ? "Working…" : "Thinking…";
+  return currentJob().operation === "review_action" ? "Working…" : "Thinking…";
 }
 function patchReceipt(revision) {
   const paths = revision?.changed_files;
@@ -945,7 +1022,7 @@ function renderHistory(task) {
     pending,
     task.review_actions,
     submitting,
-    state?.job?.running,
+    currentJob()?.running,
     progress,
   ]);
   if (key === historyKey) return;
@@ -1143,11 +1220,12 @@ async function copyWorktree() {
 $("copy-worktree").onclick = copyWorktree;
 
 function renderTask(task, running) {
-  const working = state.job?.running && state.job.task_id === task.task_id;
+  const working =
+    currentJob()?.running && currentJob().task_id === task.task_id;
   const operationError =
-    !state.job?.running &&
-    state.job?.task_id === task.task_id &&
-    state.job.error;
+    !currentJob()?.running &&
+    currentJob()?.task_id === task.task_id &&
+    currentJob().error;
   const outcome = connectionError
     ? {
         kind: "paused",
@@ -1158,7 +1236,7 @@ function renderTask(task, running) {
       ? {
           kind: "running",
           title: state.stopping ? "Stopping…" : "Working…",
-          detail: state.job.log.at(-1) || "Starting the selected action…",
+          detail: currentJob().log.at(-1) || "Starting the selected action…",
         }
       : operationError
         ? {
@@ -1251,7 +1329,8 @@ function renderTask(task, running) {
       ),
     );
   $("export-task").hidden = task.task_kind === "agent_builder";
-  $("export-task").disabled = running || task.checks_in_task;
+  $("export-task").disabled =
+    running || projectRunning() || task.checks_in_task;
   $("task-checks").hidden = !task.can_run_checks;
   $("task-checks").disabled = running;
   renderWorktree(task);
@@ -1550,8 +1629,10 @@ function renderTask(task, running) {
   for (const id of ["resume", "restart", "abandon"]) $(id).disabled = running;
 }
 async function respond(action) {
-  if (submitting || state?.job?.running) return;
+  if (submitting || currentJob()?.running) return;
   const text = $("message").value;
+  const respondingTask = selected,
+    scope = taskScope();
   if (
     [...textActions, "task_chat", "dismiss", "accept_red"].includes(action) &&
     !text.trim()
@@ -1567,8 +1648,10 @@ async function respond(action) {
       after: (state.task.messages || []).length,
       status: "Sending…",
     };
+    taskPendingMessages.set(scope, pendingMessage);
     renderHistory(state.task);
   }
+  const pending = pendingMessage;
   try {
     await command(
       action === "task_chat"
@@ -1582,15 +1665,16 @@ async function respond(action) {
             finding_ids: ids,
           },
     );
-    if (pendingMessage) pendingMessage.status = "Sent · waiting for the agent";
-    if ($("message").value === text) $("message").value = "";
+    if (pending) pending.status = "Sent · waiting for the agent";
+    if (selected === respondingTask && $("message").value === text)
+      $("message").value = "";
+    if (taskDrafts.get(scope) === text) taskDrafts.set(scope, "");
   } catch (e) {
-    if (pendingMessage)
-      pendingMessage.status =
-        "Delivery not confirmed · check status before resending";
+    if (pending)
+      pending.status = "Delivery not confirmed · check status before resending";
     throw e;
   } finally {
-    if (state?.task) renderHistory(state.task);
+    if (state?.task?.task_id === selected) renderHistory(state.task);
   }
 }
 async function loadProject() {
@@ -1622,7 +1706,7 @@ async function loadProject() {
       : "Using your default configuration. Save a choice to give this project its own preference.";
 }
 async function changeProject(path, body) {
-  if (submitting || state?.job?.running) return;
+  if (submitting || projectRunning()) return;
   submitting = true;
   render();
   try {
@@ -1636,7 +1720,7 @@ async function changeProject(path, body) {
   }
 }
 function renderMemory(
-  busy = submitting || !!state?.job?.running || !!connectionError,
+  busy = submitting || projectRunning() || !!connectionError,
 ) {
   const historical = !!memorySnapshot && memorySnapshot.id !== memoryCurrent;
   const locked = busy || memoryLoading || !memoryLoaded;
@@ -1734,8 +1818,7 @@ async function loadMemory(snapshotId = null, discard = false) {
   }
 }
 async function saveMemory(refreshSources = false) {
-  if (submitting || state?.job?.running || memoryLoading || !memoryLoaded)
-    return;
+  if (submitting || projectRunning() || memoryLoading || !memoryLoaded) return;
   if (memorySnapshot && memorySnapshot.id !== memoryCurrent)
     throw new Error("Make this version current before editing it.");
   submitting = true;
@@ -1835,7 +1918,7 @@ function handoffControls() {
   if (state) render();
 }
 async function handoffOperation(message, operation) {
-  if (handoffBusy || submitting || state?.job?.running) return;
+  if (handoffBusy || submitting || projectRunning()) return;
   handoffBusy = true;
   $("handoff-error").textContent = "";
   $("handoff-status").textContent = message;
@@ -1851,7 +1934,7 @@ async function handoffOperation(message, operation) {
   }
 }
 function openHandoff(mode, taskId = null) {
-  if (handoffBusy || submitting || state?.job?.running) return;
+  if (handoffBusy || submitting || projectRunning()) return;
   handoffArchive = handoffPreview = null;
   handoffTasks = [];
   $("handoff-title").textContent =
@@ -2041,7 +2124,7 @@ $("read-context").onclick = () =>
   guard(() => loadMemory($("context-snapshot").value));
 $("restore-context").onclick = () =>
   guard(async () => {
-    if (submitting || state?.job?.running || memoryDirty || !memorySnapshot)
+    if (submitting || projectRunning() || memoryDirty || !memorySnapshot)
       return;
     submitting = true;
     render();
@@ -2171,10 +2254,9 @@ $("new-form").onsubmit = (e) => {
 };
 $("new-task").onclick = () =>
   guard(async () => {
-    selected = null;
+    selectTask(null);
     showPage("workspace");
     packetKey = "";
-    $("message").value = "";
     await refresh();
   });
 $("refresh").onclick = () => guard(refresh);
@@ -2195,14 +2277,16 @@ $("edit-previous").onclick = () => {
   $("message").focus();
 };
 async function stopWork() {
-  if (stopPending || !state?.can_stop) return;
-  stopPending = true;
+  if (stopPending() || !state?.can_stop || !currentJob()?.running) return;
+  const stoppingTask = selected,
+    stoppingJob = currentJob().id;
+  stoppingJobs.add(stoppingJob);
   render();
   try {
-    await api("/api/stop", {});
+    await api("/api/stop", { task_id: stoppingTask, job_id: stoppingJob });
     await refresh();
   } finally {
-    stopPending = false;
+    stoppingJobs.delete(stoppingJob);
     render();
   }
 }
@@ -2216,7 +2300,7 @@ $("choose-backend").onclick = () =>
 $("restart").onclick = () =>
   guard(() => command({ command: "restart", task_id: selected }));
 async function openDeleteTask(taskId) {
-  if (submitting || handoffBusy || connectionError || state?.job?.running)
+  if (submitting || handoffBusy || connectionError || jobFor(taskId)?.running)
     return;
   const target = {
     task_id: taskId,
@@ -2477,8 +2561,8 @@ function renderPage() {
   $("new-panel").hidden = !workspace || !!selected;
   $("work").hidden =
     !workspace || !selected || state?.task?.task_id !== selected;
-  $("activity").hidden = !workspace || !state?.job;
-  $("selection").hidden = !workspace || !state?.job?.selection;
+  $("activity").hidden = !workspace || !currentJob();
+  $("selection").hidden = !workspace || !currentJob()?.selection;
   $("choose-backend").hidden = !workspace || !state?.task;
   for (const [name, info] of Object.entries(pages)) {
     $(info.link).className =
@@ -2526,7 +2610,7 @@ async function openAgents() {
   if (state) render();
   await loadAgents();
 }
-function agentControls(busy = submitting || !!state?.job?.running) {
+function agentControls(busy = submitting || !!projectRunning()) {
   const locked = busy || catalogLoading;
   $("add-agent").disabled = locked || !catalog?.writable;
   $("start-agent-chat").disabled = locked || !catalog?.writable;
@@ -2635,7 +2719,7 @@ function mutationButton(text, action, unavailable = false) {
   const control = button(text, action);
   control.dataset.agentMutation = "true";
   control.dataset.unavailable = String(unavailable);
-  control.disabled = submitting || !!state?.job?.running || unavailable;
+  control.disabled = submitting || !!projectRunning() || unavailable;
   return control;
 }
 function showAgent(profile) {
@@ -2802,7 +2886,7 @@ function renderCatalog() {
   agentControls();
 }
 async function assignAgent(role, agentId) {
-  if (submitting || state?.job?.running) return;
+  if (submitting || projectRunning()) return;
   submitting = true;
   agentControls();
   try {
@@ -2835,8 +2919,7 @@ function renderAgentDrafts() {
     const control = button(
       draft.display_name || "Agent conversation",
       async () => {
-        if (selected !== draft.task_id) $("message").value = "";
-        selected = draft.task_id;
+        selectTask(draft.task_id);
         showPage("workspace");
         packetKey = "";
         await refresh();
@@ -2859,7 +2942,7 @@ $("cancel-agent-create").onclick = () => {
 };
 $("use-agent-repository").onclick = () =>
   guard(async () => {
-    if (submitting || state?.job?.running) return;
+    if (submitting || projectRunning()) return;
     submitting = true;
     agentControls();
     try {

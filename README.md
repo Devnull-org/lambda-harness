@@ -47,6 +47,12 @@ for approvals and stops at the first error. After a failed check, choose **Ask a
 to fix the failure**, rerun checks, or send different instructions. Existing tasks
 can continue this way without restarting.
 
+Tasks can run at the same time in separate worktrees. Each task keeps its own model
+choice, conversation, draft, progress log, result, and stop control. Switching tasks
+does not move an active request, and a background task finishing does not switch your
+view. One operation runs per task; project-wide settings and handoff transfers wait
+until running tasks finish. Project memory remains shared intentionally.
+
 Errors support conversation too: use **Ask a question** to ask what failed, request
 commands you can run yourself, or describe an alternative. The agent can retry a
 supported operation with your instructions; suggested commands are displayed, not

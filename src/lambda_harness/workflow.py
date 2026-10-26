@@ -91,7 +91,7 @@ class Harness(CheckRunner):
         self.progress = progress or (lambda message: None)
         self.validation = validation or ValidationConfig()
         self.connection = sqlite3.connect(
-            self.state_dir / "checkpoints.sqlite", check_same_thread=False
+            self.state_dir / "checkpoints.sqlite", check_same_thread=False, timeout=30
         )
         builder = StateGraph(dict)
         nodes = (
@@ -129,18 +129,31 @@ class Harness(CheckRunner):
         self.graph = builder.compile(checkpointer=SqliteSaver(self.connection))
 
     @contextmanager
-    def _lock(self):
-        with (self.state_dir / "lock").open("a") as stream:
+    def _lock(self, task_id=None):
+        if task_id is not None:
+            validate_task_name(task_id)
+        with (self.state_dir / "lock").open("a") as project:
+            task = None
             try:
-                fcntl.flock(stream, fcntl.LOCK_EX | fcntl.LOCK_NB)
+                mode = fcntl.LOCK_SH if task_id is not None else fcntl.LOCK_EX
+                fcntl.flock(project, mode | fcntl.LOCK_NB)
+                if task_id is not None:
+                    directory = self.state_dir / ".task-locks"
+                    directory.mkdir(exist_ok=True, mode=0o700)
+                    task = (directory / digest(task_id)).open("a")
+                    fcntl.flock(task, fcntl.LOCK_EX | fcntl.LOCK_NB)
             except BlockingIOError as error:
+                if task:
+                    task.close()
                 raise RuntimeError(
-                    "Another harness process is running for this repository"
+                    "Another harness process is running for this task or repository"
                 ) from error
             try:
                 yield
             finally:
-                fcntl.flock(stream, fcntl.LOCK_UN)
+                if task:
+                    task.close()
+                fcntl.flock(project, fcntl.LOCK_UN)
 
     def _config(self, task_id):
         validate_task_name(task_id)
@@ -157,13 +170,13 @@ class Harness(CheckRunner):
     def start(
         self, task_id, request, *, base="HEAD", mode="phased", walkthrough=False, phase="interview"
     ):
-        with self._lock():
+        with self._lock(task_id):
             return self._start(
                 task_id, request, base=base, mode=mode, walkthrough=walkthrough, phase=phase
             )
 
     def start_agent_builder(self, task_id, request, *, agent_id=None):
-        with self._lock():
+        with self._lock(task_id):
             if not self.agents.writable:
                 raise ValueError("Choose a writable agent repository on the Agents page first")
             existing = self.agents.get(agent_id) if agent_id else None
@@ -205,7 +218,7 @@ class Harness(CheckRunner):
             "open_questions": [],
             "assumptions": [],
         }
-        with self._lock():
+        with self._lock(task_id):
             # Reject misspelled packages before creating a task or invoking a model.
             revision = resolve_base(self.repository, base)
             files = git(self.repository, "ls-tree", "-r", "--name-only", revision).splitlines()
@@ -232,7 +245,7 @@ class Harness(CheckRunner):
             raise ValueError(
                 "Choose code, security, documentation, code + security, or all reviewers"
             )
-        with self._lock():
+        with self._lock(task_id):
             source = source or resolve_review(self.repository, base, head)
             return self._start(
                 task_id,
@@ -308,7 +321,7 @@ class Harness(CheckRunner):
 
     def restart(self, task_id, *, new_task_id=None, request=None, base=None):
         """Start a new attempt without changing the previous task or its worktree."""
-        with self._lock():
+        with self._lock(task_id):
             original = self._state(task_id)
             if base is not None and original.get("task_kind") == "review":
                 raise ValueError("Start a new review to choose a different comparison base")
@@ -324,18 +337,21 @@ class Harness(CheckRunner):
                         new_task_id = candidate
                         break
                     attempt += 1
-            return self._start(
-                new_task_id,
-                original["request"] if request is None else request,
-                base=original["base"] if base is None else base,
-                walkthrough=original["walkthrough_enabled"],
-                restarted_from=task_id,
-                phase=original.get("initial_phase", "interview"),
-                standalone=original.get("standalone_start"),
-            )
+            if new_task_id == task_id:
+                raise ValueError(f"Task already exists: {task_id}; choose a new attempt name")
+            with self._lock(new_task_id):
+                return self._start(
+                    new_task_id,
+                    original["request"] if request is None else request,
+                    base=original["base"] if base is None else base,
+                    walkthrough=original["walkthrough_enabled"],
+                    restarted_from=task_id,
+                    phase=original.get("initial_phase", "interview"),
+                    standalone=original.get("standalone_start"),
+                )
 
     def inspect(self, task_id):
-        with self._lock():
+        with self._lock(task_id):
             return self._view(self._state(task_id, allow_abandoning=True))
 
     def _abandon_plan(self, task_id):
@@ -346,12 +362,12 @@ class Harness(CheckRunner):
 
     def abandon_plan(self, task_id):
         """Describe exactly which task resources a confirmation will remove."""
-        with self._lock():
+        with self._lock(task_id):
             return self._abandon_plan(task_id)
 
     def abandon(self, task_id, *, confirmation_token):
         """Delete one confirmed task, retaining shared knowledge and other tasks."""
-        with self._lock():
+        with self._lock(task_id):
             plan = self._abandon_plan(task_id)
             if not confirmation_token:
                 raise ValueError("Task deletion requires confirmation")
@@ -379,7 +395,7 @@ class Harness(CheckRunner):
 
     def resume(self, task_id, *, retry_backend=False):
         """Continue interrupted execution without answering a human gate."""
-        with self._lock():
+        with self._lock(task_id):
             state = self._state(task_id)
             snapshot = self.graph.get_state(self._config(task_id))
             if (
@@ -399,7 +415,7 @@ class Harness(CheckRunner):
         """Start one eligible phase from a saved boundary, never bypass a pending gate."""
         if not isinstance(automatic, bool):
             raise ValueError("Automatic must be enabled or disabled")
-        with self._lock():
+        with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
             config = self._config(task_id)
             if self.graph.get_state(config).next:
@@ -439,7 +455,7 @@ class Harness(CheckRunner):
 
     def use_context(self, task_id, snapshot_id=None):
         """Select memory between phases or between general chat messages."""
-        with self._lock():
+        with self._lock(task_id):
             config = self._config(task_id)
             state = copy.deepcopy(self._state(task_id))
             if state["stage"] == "ready":
@@ -456,7 +472,7 @@ class Harness(CheckRunner):
         """Discuss a task without advancing or rewriting its pending checkpoint."""
         if not text.strip():
             raise ValueError("Enter a question about this task")
-        with self._lock():
+        with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
             if state.get("task_kind") == "agent_builder":
                 raise ValueError("Use the agent design conversation for this task")
@@ -509,7 +525,7 @@ class Harness(CheckRunner):
     def respond(self, task_id, action, **fields):
         if "automatic" in fields and not isinstance(fields["automatic"], bool):
             raise ValueError("Automatic must be enabled or disabled")
-        with self._lock():
+        with self._lock(task_id):
             state = self._state(task_id)
             actions = recovery_actions(state)
             if self._can_choose_phase(state):
@@ -580,7 +596,7 @@ class Harness(CheckRunner):
 
     def review_action(self, task_id, action, *, token, role=None, finding_id=None, cancel=None):
         """Run a requested review tool without invoking a model or advancing the review."""
-        with self._lock():
+        with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
             tools = self._review_actions(state)
             if not tools or tools["token"] != token:
