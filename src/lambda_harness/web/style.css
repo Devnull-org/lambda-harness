@@ -1,25 +1,48 @@
+@font-face {
+  font-family: "Geist";
+  src: url("/fonts/Geist.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+}
+@font-face {
+  font-family: "JetBrains Mono";
+  src: url("/fonts/JetBrainsMono.woff2") format("woff2");
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+}
 :root {
   color-scheme: light;
-  --bg: #f7f8fa;
-  --ink: #202831;
-  --muted: #65717c;
-  --line: #dfe4e9;
-  --accent: #225a49;
-  --red: #ad3434;
+  --font-ui: "Geist", -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  --font-mono:
+    "JetBrains Mono", ui-monospace, SFMono-Regular, Consolas, monospace;
+  --success: #24735b;
+  --success-bg: #e7f5ee;
+  --info: #316e9b;
+  --info-bg: #e9f3fc;
+  --warm: #92601e;
+  --warm-bg: #fff4df;
+  --bg: #f8f9fd;
+  --ink: #293347;
+  --muted: #626d82;
+  --line: #dce2ef;
+  --accent: #5263c6;
+  --red: #b64256;
   --panel: #ffffff;
-  --sidebar: #eef1f4;
-  --field: #fcfdfe;
-  --soft: #f3f5f7;
-  --human: #edf4f0;
-  --human-line: #d9e6df;
-  --hover: #f6f9f8;
-  --hover-line: #8b9d96;
-  --primary-hover: #174435;
+  --sidebar: #eef3fb;
+  --field: #fbfcff;
+  --soft: #f0f3fa;
+  --human: #eef0ff;
+  --human-line: #d8ddf5;
+  --hover: #edf1fc;
+  --hover-line: #8a98bd;
+  --primary-hover: #4354b0;
   --primary-text: #ffffff;
-  --focus: #99c4b3;
-  --danger-bg: #fff0ef;
-  --danger-line: #ebc9c5;
-  --shadow: #182a3810;
+  --focus: #6b78cf;
+  --danger-bg: #fff0f2;
+  --danger-line: #edc2cb;
+  --shadow: #3948750d;
   --diff-add-bg: #b9f6ca;
   --diff-add-ink: #064b21;
   --diff-add-border: #16833b;
@@ -35,34 +58,42 @@
   background: var(--danger-bg);
 }
 .task-outcome[data-kind="success"] {
-  background: var(--human);
+  border-color: var(--success);
+  background: var(--success-bg);
 }
 .task-outcome[data-kind="waiting"],
 .task-outcome[data-kind="paused"] {
-  border-color: #c48a21;
+  border-color: var(--warm);
+  background: var(--warm-bg);
 }
 :root[data-theme="dark"] {
   color-scheme: dark;
-  --bg: #121517;
-  --ink: #e7e9ec;
-  --muted: #a5aeb7;
-  --line: #3c444c;
-  --accent: #9ed6bf;
-  --red: #ffb0ac;
-  --panel: #1c2125;
-  --sidebar: #171b1f;
-  --field: #161b1e;
-  --soft: #252b30;
-  --human: #20332b;
-  --human-line: #40594b;
-  --hover: #28342e;
-  --hover-line: #719c88;
-  --primary-hover: #b9e8d4;
-  --primary-text: #14291f;
-  --focus: #9ed6bf;
-  --danger-bg: #3c2426;
-  --danger-line: #825154;
-  --shadow: #00000030;
+  --success: #92d9b7;
+  --success-bg: #223d37;
+  --info: #9bcdf6;
+  --info-bg: #263e54;
+  --warm: #f1c588;
+  --warm-bg: #44392a;
+  --bg: #191d2a;
+  --ink: #e6eaf4;
+  --muted: #adb7cd;
+  --line: #3e4860;
+  --accent: #abb8ff;
+  --red: #ffacbb;
+  --panel: #242a3b;
+  --sidebar: #202537;
+  --field: #1c2232;
+  --soft: #2c3448;
+  --human: #2f3957;
+  --human-line: #4b5b87;
+  --hover: #303b55;
+  --hover-line: #7c8fb6;
+  --primary-hover: #c2ccff;
+  --primary-text: #202844;
+  --focus: #abb8ff;
+  --danger-bg: #412a37;
+  --danger-line: #7d495a;
+  --shadow: #080e2028;
   --diff-add-bg: #164b2c;
   --diff-add-ink: #a7ffbf;
   --diff-add-border: #4ee57e;
@@ -73,26 +104,32 @@
 @media (prefers-color-scheme: dark) {
   :root:not([data-theme="light"]) {
     color-scheme: dark;
-    --bg: #121517;
-    --ink: #e7e9ec;
-    --muted: #a5aeb7;
-    --line: #3c444c;
-    --accent: #9ed6bf;
-    --red: #ffb0ac;
-    --panel: #1c2125;
-    --sidebar: #171b1f;
-    --field: #161b1e;
-    --soft: #252b30;
-    --human: #20332b;
-    --human-line: #40594b;
-    --hover: #28342e;
-    --hover-line: #719c88;
-    --primary-hover: #b9e8d4;
-    --primary-text: #14291f;
-    --focus: #9ed6bf;
-    --danger-bg: #3c2426;
-    --danger-line: #825154;
-    --shadow: #00000030;
+    --success: #92d9b7;
+    --success-bg: #223d37;
+    --info: #9bcdf6;
+    --info-bg: #263e54;
+    --warm: #f1c588;
+    --warm-bg: #44392a;
+    --bg: #191d2a;
+    --ink: #e6eaf4;
+    --muted: #adb7cd;
+    --line: #3e4860;
+    --accent: #abb8ff;
+    --red: #ffacbb;
+    --panel: #242a3b;
+    --sidebar: #202537;
+    --field: #1c2232;
+    --soft: #2c3448;
+    --human: #2f3957;
+    --human-line: #4b5b87;
+    --hover: #303b55;
+    --hover-line: #7c8fb6;
+    --primary-hover: #c2ccff;
+    --primary-text: #202844;
+    --focus: #abb8ff;
+    --danger-bg: #412a37;
+    --danger-line: #7d495a;
+    --shadow: #080e2028;
     --diff-add-bg: #164b2c;
     --diff-add-ink: #a7ffbf;
     --diff-add-border: #4ee57e;
@@ -108,11 +145,7 @@ body {
   margin: 0;
   background: var(--bg);
   color: var(--ink);
-  font:
-    15px/1.6 -apple-system,
-    BlinkMacSystemFont,
-    "Segoe UI",
-    sans-serif;
+  font: 15px/1.6 var(--font-ui);
   display: flex;
   min-height: 100vh;
 }
@@ -480,7 +513,7 @@ select {
   font-size: 17px;
 }
 #worktree-path {
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
+  font-family: var(--font-mono);
   overflow-wrap: anywhere;
 }
 #worktree-status {
@@ -530,11 +563,7 @@ select {
 }
 .prose pre,
 pre {
-  font:
-    12px/1.6 ui-monospace,
-    SFMono-Regular,
-    Menlo,
-    monospace;
+  font: 13px/1.65 var(--font-mono);
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: var(--soft);
@@ -1468,4 +1497,36 @@ aside .sidebar-footer {
   aside .workspace-link {
     transition: none;
   }
+}
+
+code,
+kbd,
+samp,
+textarea,
+.repo {
+  font-family: var(--font-mono);
+  font-variant-ligatures: none;
+}
+pre {
+  font-variant-ligatures: none;
+  tab-size: 4;
+}
+aside #project-memory .nav-icon {
+  color: var(--success);
+}
+aside #workspace-link .nav-icon {
+  color: var(--info);
+}
+aside #project-tools .nav-icon {
+  color: var(--warm);
+}
+aside #agents-link .nav-icon {
+  color: var(--accent);
+}
+aside .local-dot {
+  background: var(--success);
+}
+.badge {
+  color: var(--info);
+  background: var(--info-bg);
 }

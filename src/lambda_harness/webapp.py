@@ -770,6 +770,8 @@ def create_server(app, port=8765, *, phone=None):
                 "/app.js": "app.js",
                 "/theme.js": "theme.js",
                 "/style.css": "style.css",
+                "/fonts/Geist.woff2": "fonts/Geist.woff2",
+                "/fonts/JetBrainsMono.woff2": "fonts/JetBrainsMono.woff2",
             }
             match = re.fullmatch(
                 r"/projects/([a-f0-9]{16})(?:/(memory|settings|agents))?", path.path
@@ -782,17 +784,19 @@ def create_server(app, port=8765, *, phone=None):
                     404, {"error": "Project or page not found. Open /projects to choose a project."}
                 )
                 return
-            content = files("lambda_harness").joinpath("web", name).read_text()
+            content = files("lambda_harness").joinpath("web", name).read_bytes()
             if name == "index.html":
-                content = content.replace("HARNESS_SESSION_TOKEN", hub.token)
+                content = content.replace(b"HARNESS_SESSION_TOKEN", hub.token.encode())
             types = {
                 "index.html": "text/html; charset=utf-8",
                 "guide.html": "text/html; charset=utf-8",
                 "app.js": "text/javascript; charset=utf-8",
                 "theme.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8",
+                "fonts/Geist.woff2": "font/woff2",
+                "fonts/JetBrainsMono.woff2": "font/woff2",
             }
-            self.send(200, content.encode(), types[name])
+            self.send(200, content, types[name])
 
         def do_POST(self):
             if not self.authorized(api=True):
