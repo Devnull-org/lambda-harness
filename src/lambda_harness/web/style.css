@@ -117,14 +117,20 @@ body {
   min-height: 100vh;
 }
 aside {
-  width: 252px;
+  width: 268px;
   flex-shrink: 0;
-  padding: 30px 20px;
+  padding: 24px 18px;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
   position: sticky;
   top: 0;
   height: 100vh;
+  height: 100dvh;
+  overflow-x: hidden;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
   display: flex;
   flex-direction: column;
 }
@@ -160,9 +166,9 @@ aside {
   justify-content: space-between;
   margin: 30px 0 8px;
 }
-nav {
-  overflow: auto;
-  flex: 1;
+#tasks {
+  overflow: visible;
+  flex: none;
 }
 nav button {
   display: block;
@@ -700,8 +706,8 @@ dialog::backdrop {
   .sidebar-footer {
     display: none;
   }
-  nav {
-    max-height: 150px;
+  #tasks {
+    max-height: none;
   }
   .sidebar-heading {
     margin-top: 14px;
@@ -1024,11 +1030,11 @@ dialog {
 .project-navigation {
   margin: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: visible;
   font-size: inherit;
 }
 .project-navigation[open] {
-  flex: 1;
+  flex: 0 0 auto;
 }
 .project-navigation > summary {
   display: block;
@@ -1170,4 +1176,296 @@ dialog {
 }
 #task-controls .button-row:empty {
   display: none;
+}
+
+/* One scroll surface keeps project navigation and saved tasks together. */
+aside > * {
+  flex-shrink: 0;
+}
+aside:hover,
+aside:focus-within {
+  scrollbar-color: var(--hover-line) transparent;
+}
+aside::-webkit-scrollbar {
+  width: 5px;
+}
+aside::-webkit-scrollbar-thumb {
+  background: transparent;
+  border-radius: 20px;
+}
+aside:hover::-webkit-scrollbar-thumb,
+aside:focus-within::-webkit-scrollbar-thumb {
+  background: var(--hover-line);
+}
+aside .brand {
+  gap: 10px;
+  margin: 0 0 24px;
+}
+aside .brand .brand-mark {
+  display: grid;
+  place-items: center;
+  width: 38px;
+  height: 38px;
+  flex-shrink: 0;
+  font-size: 27px;
+  font-family: Georgia, serif;
+  font-weight: 400;
+  border-radius: 12px;
+  color: var(--primary-text);
+  background: var(--accent);
+  box-shadow: 0 4px 12px var(--shadow);
+}
+aside .brand span {
+  font-size: 15px;
+  letter-spacing: -0.4px;
+}
+aside .brand small {
+  display: block;
+  font-size: 8px;
+  letter-spacing: 1.5px;
+  color: var(--muted);
+  font-weight: 500;
+  margin-top: 3px;
+}
+.global-navigation {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px;
+  padding-bottom: 20px;
+  margin-bottom: 18px;
+  border-bottom: 1px solid var(--line);
+}
+aside .workspace-link {
+  align-items: center;
+  justify-content: flex-start;
+  gap: 10px;
+  font-size: 13px;
+  padding: 9px 11px;
+  border: 1px solid transparent;
+  border-radius: 10px;
+  transition:
+    background 120ms,
+    border-color 120ms;
+}
+aside .workspace-link.selected {
+  color: var(--accent);
+  background: var(--human);
+  border-color: var(--human-line);
+  font-weight: 600;
+}
+aside #projects-link {
+  margin: 0;
+}
+.nav-icon {
+  width: 17px;
+  height: 17px;
+  flex: 0 0 17px;
+  opacity: 0.8;
+}
+aside .project-picker-label {
+  font-size: 9px;
+  letter-spacing: 1.5px;
+  font-weight: 700;
+  margin: 0 0 7px 3px;
+}
+aside #project-picker {
+  border-radius: 10px;
+  padding: 10px;
+  font-size: 13px;
+  background: var(--panel);
+}
+aside .project-navigation {
+  margin-top: 18px;
+}
+aside .project-navigation > summary {
+  padding: 8px 26px 8px 10px;
+  border-radius: 10px;
+  cursor: pointer;
+}
+aside .project-navigation > summary:hover {
+  background: var(--soft);
+}
+aside .project-navigation > summary .eyebrow {
+  font-size: 8px;
+  letter-spacing: 1.3px;
+}
+aside .project-name {
+  margin-top: 2px;
+  font-size: 16px;
+  line-height: 1.4;
+  letter-spacing: -0.3px;
+}
+aside .project-navigation > summary::after {
+  right: 10px;
+  top: 22px;
+  font-size: 18px;
+}
+aside .repo {
+  margin: 0 10px 15px;
+  font-size: 10px;
+  line-height: 1.6;
+  color: var(--muted);
+}
+.project-links {
+  display: grid;
+  gap: 3px;
+}
+aside #new-task {
+  margin-top: 16px;
+  border-radius: 10px;
+  font-size: 13px;
+  padding: 11px;
+  box-shadow: 0 3px 10px var(--shadow);
+}
+aside .sidebar-heading {
+  margin: 24px 4px 8px 10px;
+  font-size: 9px;
+  letter-spacing: 1.4px;
+}
+aside .sidebar-heading .quiet {
+  font-size: 10px;
+  color: var(--muted);
+}
+aside .saved-task {
+  position: relative;
+  border-radius: 10px;
+  border: 1px solid transparent;
+  gap: 0;
+  margin: 5px 0;
+}
+aside .saved-task:hover {
+  background: var(--soft);
+}
+aside .saved-task.selected {
+  background: var(--human);
+  border-color: var(--human-line);
+  box-shadow: none;
+}
+aside .saved-task.selected::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 13px;
+  bottom: 13px;
+  width: 3px;
+  border-radius: 0 3px 3px 0;
+  background: var(--accent);
+}
+aside .saved-task .task-open {
+  padding: 11px 10px 11px 14px;
+  font-size: 13px;
+  font-weight: 500;
+  border-radius: 10px;
+  background: transparent;
+}
+aside .saved-task.selected .task-open {
+  color: var(--accent);
+}
+aside .saved-task small {
+  font-size: 10px;
+  font-weight: 400;
+  margin-top: 2px;
+}
+aside .saved-task .task-delete {
+  opacity: 0;
+  flex-basis: 30px;
+  width: 30px;
+  height: 32px;
+  margin-right: 4px;
+  border-radius: 8px;
+  font-size: 18px;
+}
+aside .saved-task:hover .task-delete,
+aside .saved-task:focus-within .task-delete {
+  opacity: 1;
+}
+aside .guide-link {
+  display: block;
+  margin-top: auto;
+  padding: 22px 10px 12px;
+  text-align: left;
+  text-decoration: none;
+  color: var(--muted);
+  font-size: 11px;
+}
+aside .guide-link:hover {
+  color: var(--accent);
+}
+.sidebar-preferences {
+  border-top: 1px solid var(--line);
+  padding: 12px 10px 0;
+  margin-top: 0;
+  font-size: 11px;
+  color: var(--muted);
+}
+.sidebar-preferences > summary {
+  cursor: pointer;
+}
+.sidebar-preferences .theme-label {
+  margin-top: 14px;
+  font-size: 11px;
+}
+.sidebar-preferences #permission-sound {
+  margin-top: 8px;
+  text-align: left;
+  padding-left: 0;
+  font-size: 11px;
+}
+aside .sidebar-footer {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 18px 10px 0;
+  font-size: 10px;
+}
+.local-dot {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+@media (hover: none) {
+  aside .saved-task .task-delete {
+    opacity: 1;
+    flex-basis: 44px;
+    width: 44px;
+    height: 44px;
+  }
+  aside {
+    scrollbar-color: var(--hover-line) transparent;
+  }
+}
+@media (max-width: 900px) and (min-width: 651px) {
+  aside {
+    width: 238px;
+    padding: 20px 12px;
+  }
+}
+@media (max-width: 650px) {
+  aside {
+    height: auto;
+    overflow: visible;
+    padding: 16px;
+  }
+  aside .brand {
+    margin-bottom: 16px;
+  }
+  .global-navigation {
+    padding-bottom: 12px;
+    margin-bottom: 12px;
+  }
+  aside .project-navigation {
+    margin-top: 10px;
+  }
+  aside .guide-link {
+    padding-top: 14px;
+  }
+  aside .sidebar-footer {
+    display: none;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  aside .workspace-link {
+    transition: none;
+  }
 }

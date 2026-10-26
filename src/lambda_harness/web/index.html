@@ -10,73 +10,152 @@
     <script defer src="/app.js"></script>
   </head>
   <body>
-    <aside>
-      <a class="brand" href="/">λ <span>Lambda Harness</span></a>
-      <label class="project-picker-label" for="project-picker"
-        >Switch project</label
+    <aside aria-label="Main navigation">
+      <a class="brand" href="/"
+        ><span class="brand-mark" aria-hidden="true">λ</span
+        ><span>Lambda Harness<small>YOUR LOCAL WORKSPACE</small></span></a
       >
+      <div class="global-navigation">
+        <a id="projects-link" class="workspace-link" href="/projects"
+          ><svg
+            class="nav-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <rect x="3" y="3" width="7" height="7" rx="1.5" />
+            <rect x="14" y="3" width="7" height="7" rx="1.5" />
+            <rect x="3" y="14" width="7" height="7" rx="1.5" />
+            <rect x="14" y="14" width="7" height="7" rx="1.5" /></svg
+          >Projects</a
+        >
+        <a id="agents-link" class="workspace-link" href="/agents"
+          ><svg
+            class="nav-icon"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="1.6"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+            aria-hidden="true"
+          >
+            <circle cx="9" cy="8" r="3" />
+            <path
+              d="M3 21v-3a6 6 0 0 1 12 0v3M16 5a3 3 0 0 1 0 6m2 4a5 5 0 0 1 3 4v2"
+            /></svg
+          >Agents</a
+        >
+      </div>
+      <label class="project-picker-label" for="project-picker">PROJECT</label>
       <select id="project-picker" aria-label="Switch project"></select>
-      <a id="projects-link" class="workspace-link" href="/projects"
-        >Projects <span>＋</span></a
-      >
       <details id="project-navigation" class="project-navigation" open>
         <summary>
           <span class="eyebrow">ACTIVE PROJECT</span>
           <strong id="project-name" class="project-name"></strong>
         </summary>
         <div id="repository" class="repo"></div>
-        <a id="workspace-link" class="workspace-link" href="/">Workspace</a>
-        <a id="project-memory" class="workspace-link" href="/project-memory"
-          >Memory</a
-        >
-        <a id="project-tools" class="workspace-link" href="/project-settings"
-          >Settings</a
-        >
+        <div class="project-links">
+          <a id="workspace-link" class="workspace-link" href="/"
+            ><svg
+              class="nav-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <rect x="3" y="4" width="18" height="16" rx="2" />
+              <path d="M3 9h18M9 9v11" /></svg
+            >Workspace</a
+          >
+          <a id="project-memory" class="workspace-link" href="/project-memory"
+            ><svg
+              class="nav-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path
+                d="M12 5v16M3 4h4a5 5 0 0 1 5 3 5 5 0 0 1 5-3h4v15h-4a5 5 0 0 0-5 2 5 5 0 0 0-5-2H3z"
+              /></svg
+            >Memory</a
+          >
+          <a id="project-tools" class="workspace-link" href="/project-settings"
+            ><svg
+              class="nav-icon"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="1.6"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+              aria-hidden="true"
+            >
+              <path d="M4 7h16M4 17h16" />
+              <circle cx="9" cy="7" r="3" />
+              <circle cx="15" cy="17" r="3" /></svg
+            >Settings</a
+          >
+        </div>
         <button id="new-task" class="primary wide">＋ New task</button>
         <div class="sidebar-heading">
-          SAVED WORK <button id="refresh" class="quiet">Refresh</button>
+          TASKS <button id="refresh" class="quiet">Refresh</button>
         </div>
         <nav id="tasks" aria-label="Saved tasks"></nav>
-        <div class="eyebrow shared-heading">SHARED ACROSS PROJECTS</div>
-        <a id="agents-link" class="workspace-link" href="/agents">Agents</a>
       </details>
       <a class="guide-link" href="/guide" target="_blank" rel="noopener"
         >Workflow guide ↗</a
       >
-      <label class="theme-label"
-        >Appearance
-        <select data-theme-picker aria-label="Appearance">
-          <option value="system">System</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
-        </select>
-      </label>
-      <button
-        id="permission-sound"
-        class="quiet"
-        type="button"
-        aria-pressed="true"
-        title="Play a bell for patch approval requests and blocked validation"
-      >
-        Permission sound: on
-      </button>
-      <details id="phone-access" class="phone-access" hidden>
-        <summary>Open on your phone · QR code</summary>
-        <img
-          id="phone-qr"
-          src="/phone-qr.svg"
-          alt="Scan to open Lambda Harness on your phone"
-          width="196"
-          height="196"
-          loading="lazy"
-        />
-        <p>Scan with your phone’s camera. Tailscale must be connected.</p>
-        <a id="phone-url" target="_blank" rel="noopener"></a>
-        <p id="phone-status"></p>
-        <p>Keep this computer awake and Tailscale connected on both devices.</p>
+      <details class="sidebar-preferences">
+        <summary>Preferences &amp; phone access</summary>
+        <label class="theme-label"
+          >Appearance
+          <select data-theme-picker aria-label="Appearance">
+            <option value="system">System</option>
+            <option value="light">Light</option>
+            <option value="dark">Dark</option>
+          </select>
+        </label>
+        <button
+          id="permission-sound"
+          class="quiet"
+          type="button"
+          aria-pressed="true"
+          title="Play a bell for patch approval requests and blocked validation"
+        >
+          Permission sound: on
+        </button>
+        <details id="phone-access" class="phone-access" hidden>
+          <summary>Open on your phone · QR code</summary>
+          <img
+            id="phone-qr"
+            src="/phone-qr.svg"
+            alt="Scan to open Lambda Harness on your phone"
+            width="196"
+            height="196"
+            loading="lazy"
+          />
+          <p>Scan with your phone’s camera. Tailscale must be connected.</p>
+          <a id="phone-url" target="_blank" rel="noopener"></a>
+          <p id="phone-status"></p>
+          <p>
+            Keep this computer awake and Tailscale connected on both devices.
+          </p>
+        </details>
       </details>
       <div class="sidebar-footer">
-        Your work stays local.<br />Every next phase is your choice.
+        <span class="local-dot" aria-hidden="true"></span> Your work stays local
       </div>
     </aside>
     <main>
