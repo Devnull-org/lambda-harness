@@ -525,35 +525,91 @@
       </section>
       <section id="work" hidden>
         <div id="task-meta" class="metadata"></div>
-        <button id="task-checks" class="quiet" hidden>
-          Run all checks and tests
-        </button>
         <section
           id="task-outcome"
           class="panel task-outcome"
           role="status"
           aria-live="polite"
         ></section>
-        <section id="execution-controls" class="panel">
-          <label for="execution-mode">How to continue</label>
-          <select id="execution-mode">
-            <option value="phased">One step at a time</option>
-            <option value="full">All remaining steps automatically</option>
-          </select>
-          <p class="muted">
-            Choose an action to start. Automatic mode continues after successful
-            steps and stops for errors, questions, or permissions. You can
-            change this choice before any action.
-          </p>
-        </section>
-        <section id="next-phases" class="panel" hidden>
-          <h2>Choose the next step</h2>
-          <div id="phases" class="button-row"></div>
-          <p class="muted">
-            Workflow: Requirements → New or existing tests → Implementation →
-            Refactoring → Code review → Security review → Local handoff. Each
-            step becomes available when its prerequisites are complete.
-          </p>
+        <section
+          id="task-controls"
+          class="panel"
+          aria-labelledby="task-controls-title"
+        >
+          <h2 id="task-controls-title">Task actions</h2>
+          <div id="execution-controls">
+            <label for="execution-mode">How to continue</label>
+            <select id="execution-mode">
+              <option value="phased">One step at a time</option>
+              <option value="full">All remaining steps automatically</option>
+            </select>
+            <p class="muted">
+              Choose an action to start. Automatic mode continues after
+              successful steps and stops for errors, questions, or permissions.
+              You can change this choice before any action.
+            </p>
+          </div>
+          <div id="next-phases" hidden>
+            <h3>Choose the next step</h3>
+            <div id="phases" class="button-row"></div>
+            <p class="muted">
+              Workflow: Requirements → New or existing tests → Implementation →
+              Refactoring → Code review → Security review → Local handoff. Each
+              step becomes available when its prerequisites are complete.
+            </p>
+          </div>
+          <div class="button-row">
+            <button id="task-checks" hidden>Run all checks and tests</button>
+          </div>
+          <div id="reply-model-picker" class="model-picker" hidden>
+            <label for="reply-chat-model">Model for the next response</label>
+            <div class="model-controls">
+              <select id="reply-chat-model"></select>
+              <button id="reply-refresh-models" type="button" class="quiet">
+                Refresh models
+              </button>
+            </div>
+            <small id="reply-model-status" class="muted" role="status"></small>
+          </div>
+          <section id="composer" hidden>
+            <div class="compose-top">
+              <label id="composer-label" for="message">Your instructions</label
+              ><button id="edit-previous" class="quiet" hidden>
+                Edit previous message
+              </button>
+            </div>
+            <textarea
+              id="message"
+              rows="5"
+              placeholder="Ask a follow-up or describe what should change."
+            ></textarea>
+            <div id="findings"></div>
+            <div class="form-footer">
+              <div>
+                <select
+                  id="message-action"
+                  aria-label="Message action"
+                  hidden
+                ></select
+                ><small class="muted"
+                  >Enter adds a line · Ctrl/⌘ + Enter sends</small
+                >
+              </div>
+              <div class="composer-buttons">
+                <button id="composer-stop" class="stop" hidden>
+                  ■ Stop model
+                </button>
+                <button id="send" class="primary">Send →</button>
+              </div>
+            </div>
+          </section>
+          <div id="actions" class="button-row"></div>
+          <div class="task-footer">
+            <button id="resume" class="quiet">Resume</button
+            ><button id="restart" class="quiet">Start a fresh attempt</button
+            ><button id="export-task" class="quiet">Export handoff</button
+            ><button id="abandon" class="quiet danger">Delete task</button>
+          </div>
         </section>
         <section
           id="task-worktree"
@@ -590,55 +646,6 @@
           tabindex="0"
         ></div>
         <div id="packet" class="panel"></div>
-        <div id="reply-model-picker" class="model-picker" hidden>
-          <label for="reply-chat-model">Model for the next response</label>
-          <div class="model-controls">
-            <select id="reply-chat-model"></select>
-            <button id="reply-refresh-models" type="button" class="quiet">
-              Refresh models
-            </button>
-          </div>
-          <small id="reply-model-status" class="muted" role="status"></small>
-        </div>
-        <section id="composer" class="panel" hidden>
-          <div class="compose-top">
-            <label id="composer-label" for="message">Your instructions</label
-            ><button id="edit-previous" class="quiet" hidden>
-              Edit previous message
-            </button>
-          </div>
-          <textarea
-            id="message"
-            rows="5"
-            placeholder="Ask a follow-up or describe what should change."
-          ></textarea>
-          <div id="findings"></div>
-          <div class="form-footer">
-            <div>
-              <select
-                id="message-action"
-                aria-label="Message action"
-                hidden
-              ></select
-              ><small class="muted"
-                >Enter adds a line · Ctrl/⌘ + Enter sends</small
-              >
-            </div>
-            <div class="composer-buttons">
-              <button id="composer-stop" class="stop" hidden>
-                ■ Stop model
-              </button>
-              <button id="send" class="primary">Send →</button>
-            </div>
-          </div>
-          <div id="actions" class="button-row"></div>
-        </section>
-        <div class="task-footer">
-          <button id="resume" class="quiet">Resume</button
-          ><button id="restart" class="quiet">Start a fresh attempt</button
-          ><button id="export-task" class="quiet">Export handoff</button
-          ><button id="abandon" class="quiet danger">Delete task</button>
-        </div>
         <section id="exploration-notes" class="panel" hidden></section>
       </section>
       <section id="selection" class="panel" hidden>

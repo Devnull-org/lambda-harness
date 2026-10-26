@@ -1118,7 +1118,7 @@ function renderTask(task, running) {
     if (outcome.guidance) status.append(prose(outcome.guidance));
     if (!working && task.prompt?.actions?.length) {
       const link = el("a", "Choose next action ↓");
-      link.href = "#composer";
+      link.href = "#task-controls";
       status.append(link);
     }
   }

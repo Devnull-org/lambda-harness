@@ -1158,3 +1158,16 @@ dialog {
     animation: none;
   }
 }
+
+#task-controls > div + div,
+#task-controls #composer {
+  margin-top: 16px;
+}
+#task-controls .task-footer {
+  flex-wrap: wrap;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+#task-controls .button-row:empty {
+  display: none;
+}
