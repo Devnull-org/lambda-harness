@@ -631,6 +631,11 @@ class Harness(CheckRunner):
         }
         if state.get("agent_origin"):
             view["agent_id"] = state["agent_origin"]["id"]
+        if view.get("prompt", {}).get("summary") == (
+            "Fix selected. Start the indicated phase to address it."
+        ):
+            # Older checkpoints retain this obsolete instruction.
+            view["prompt"] = {**view["prompt"], "summary": ""}
         if state["stage"] == "abandoning":
             view["revision"] = state.get("cleanup_revision")
         elif inspect_worktree:
@@ -2264,9 +2269,7 @@ class Harness(CheckRunner):
                     next_stage = (
                         "tests_requested" if state["next"] == "tests" else "refactor_requested"
                     )
-                    self._phase_complete(
-                        state, next_stage, "Fix selected. Start the indicated phase to address it."
-                    )
+                    self._phase_complete(state, next_stage, "")
         else:
             state["attempts"] = 0
             if stage in {"interview", "specification_review"}:
