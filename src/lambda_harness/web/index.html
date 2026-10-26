@@ -365,12 +365,12 @@
           their own version until you change it.
         </p>
         <p id="context-status" role="status"></p>
-        <div class="memory-versions">
+        <div id="memory-versions" class="memory-versions" hidden>
           <label for="context-snapshot">Version history</label>
           <div class="button-row">
             <select id="context-snapshot"></select>
             <button id="read-context">View version</button>
-            <button id="restore-context">Make this current</button>
+            <button id="restore-context" hidden>Make this current</button>
           </div>
         </div>
         <p class="muted">

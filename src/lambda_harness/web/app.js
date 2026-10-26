@@ -1585,8 +1585,10 @@ function renderMemory(
   $("context-sources").readOnly = historical || locked;
   for (const id of ["save-context", "refresh-context"])
     $(id).disabled = locked || historical;
+  $("memory-versions").hidden = !memoryLoaded || !memoryHistory.length;
   $("read-context").disabled = locked || !memoryHistory.length;
-  $("context-snapshot").disabled = locked;
+  $("context-snapshot").disabled = locked || !memoryHistory.length;
+  $("restore-context").hidden = !historical;
   $("restore-context").disabled = locked || !historical || memoryDirty;
   $("discard-context").disabled = busy || memoryLoading;
   $("use-context").disabled =
@@ -1597,15 +1599,18 @@ function renderMemory(
     ? "Loading memory…"
     : !memoryLoaded
       ? ""
-      : `Current project version: ${memoryCurrent?.slice(0, 12) || "none"}. ` +
-        (historical
+      : !memoryCurrent && !memorySnapshot
+        ? "No project memory yet. Add notes or reference files below, then save."
+        : historical
           ? `Viewing earlier version ${memorySnapshot.id.slice(0, 12)} (read only).`
-          : "Viewing current memory.");
+          : `Viewing current memory · version ${memoryCurrent.slice(0, 12)}.`;
   $("memory-draft").textContent = memoryDirty
     ? "Unsaved changes. Save before previewing or applying this draft."
     : historical
       ? "Make this version current to edit it. Previous versions remain in history."
-      : "Changes create a saved version. Clear the notes and file list to empty current memory; history is retained.";
+      : !memoryCurrent
+        ? "Your first save creates the memory that new tasks will use."
+        : "Changes create a saved version. Clear the notes and file list to empty current memory; history is retained.";
   const task = state?.task;
   $("task-memory-status").textContent = task
     ? `${task.task_id}: ${task.project_context_id?.slice(0, 12) || "no memory selected"}. ` +
