@@ -1139,6 +1139,10 @@ function permissionCard(task) {
   entry.append(controls);
   return entry;
 }
+function scrollToLatestMessage() {
+  if (page !== "workspace") return;
+  $("history").lastElementChild?.scrollIntoView({ block: "end" });
+}
 function renderHistory(task) {
   const messages = task.messages || [];
   const progress = responseProgress(task.task_id);
@@ -1168,8 +1172,8 @@ function renderHistory(task) {
   ]);
   if (key === historyKey) return;
   const history = $("history");
-  const atBottom =
-    history.scrollTop + history.clientHeight >= history.scrollHeight - 60;
+  const bottom = history.getBoundingClientRect().bottom;
+  const atBottom = bottom >= 0 && bottom <= globalThis.innerHeight + 60;
   const switched = historyTask !== task.task_id;
   historyKey = key;
   historyTask = task.task_id;
@@ -1326,7 +1330,7 @@ function renderHistory(task) {
     history.append(entry);
   }
   if (atBottom || switched || pending?.status === "Sending…")
-    history.scrollTop = history.scrollHeight;
+    scrollToLatestMessage();
 }
 function renderWorktree(task) {
   const panel = $("task-worktree"),
@@ -2397,9 +2401,7 @@ $("new-task").onclick = () =>
 $("refresh").onclick = () => guard(refresh);
 $("task-checks").onclick = () =>
   guard(() => command({ command: "task_checks", task_id: selected }));
-$("latest-message").onclick = () => {
-  $("history").scrollTop = $("history").scrollHeight;
-};
+$("latest-message").onclick = scrollToLatestMessage;
 $("send").onclick = () => guard(() => respond($("message-action").value));
 $("message").onkeydown = (e) => {
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("send").disabled) {

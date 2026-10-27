@@ -31,6 +31,15 @@ class Element {
     this.text = "";
     this.children = children;
   }
+  get lastElementChild() {
+    return this.children.at(-1);
+  }
+  getBoundingClientRect() {
+    return { bottom: this.bottom ?? 1000 };
+  }
+  scrollIntoView(options) {
+    this.scrollCalls = [...(this.scrollCalls || []), options];
+  }
   querySelector() {
     return (
       this.children.find((n) => n.tagName === "button") || new Element("button")
@@ -681,6 +690,7 @@ async function app({
   let timerId = 0;
   const timers = new Map();
   const context = vm.createContext({
+    innerHeight: 800,
     AudioContext: audio,
     localStorage: storage,
     matchMedia: () => ({ matches: mobile }),
@@ -3508,3 +3518,41 @@ test("native permission bells announce background jobs once without leaking thei
   await ui.run("refresh()");
   assert(runtimeControls(ui).every((n) => n.disabled));
 });
+
+for (const mobile of [false, true]) {
+  test(`conversation follows page position and Latest message scrolls the response into view (${mobile ? "mobile" : "desktop"})`, async () => {
+    const current = snapshot();
+    const ui = await app({ mobile, fetcher: async () => response(current) });
+    const history = ui.elements.get("history");
+    assert.equal(history.lastElementChild.scrollCalls.length, 1);
+
+    // Reading older content must not jump to a newly arriving reply.
+    history.bottom = 1200;
+    current.task.messages.push({ text: "Another question" });
+    await ui.run("refresh()");
+    assert.equal(history.lastElementChild.scrollCalls, undefined);
+    ui.elements.get("latest-message").onclick();
+    assert.equal(history.lastElementChild.scrollCalls.length, 1);
+    assert.equal(history.lastElementChild.scrollCalls[0].block, "end");
+    assert.equal(history.scrollTop, 0);
+
+    // Follow new replies only while the conversation end is visible.
+    history.bottom = 790;
+    current.task.messages.push({ text: "Visible response" });
+    await ui.run("refresh()");
+    assert.equal(history.lastElementChild.scrollCalls.length, 1);
+    history.bottom = -200;
+    current.task.messages.push({
+      text: "Reply while reading below the conversation",
+    });
+    await ui.run("refresh()");
+    assert.equal(history.lastElementChild.scrollCalls, undefined);
+
+    // Background task updates must not scroll another project page.
+    await ui.run('showPage("memory")');
+    history.bottom = 790;
+    current.task.messages.push({ text: "Background reply" });
+    await ui.run("refresh()");
+    assert.equal(history.lastElementChild.scrollCalls, undefined);
+  });
+}

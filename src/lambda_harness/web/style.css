@@ -155,15 +155,6 @@ aside {
   padding: 24px 18px;
   background: var(--sidebar);
   border-right: 1px solid var(--line);
-  position: sticky;
-  top: 0;
-  height: 100vh;
-  height: 100dvh;
-  overflow-x: hidden;
-  overflow-y: auto;
-  overscroll-behavior: contain;
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
   display: flex;
   flex-direction: column;
 }
@@ -563,9 +554,6 @@ select {
   gap: 12px;
 }
 #history {
-  max-height: min(58vh, 48rem);
-  overflow-y: auto;
-  overscroll-behavior: contain;
   padding: 2px 8px 2px 2px;
   margin-bottom: 24px;
 }
@@ -645,9 +633,10 @@ summary {
   margin-block: 14px;
   color: var(--muted);
 }
-#activity-log #log {
-  max-height: 25vh;
-  overflow: auto;
+/* Conversation content shares the document's vertical scrollbar. */
+#work pre {
+  max-height: none;
+  overflow: visible;
 }
 .permission-request {
   border: 1px solid var(--accent);
@@ -1219,24 +1208,8 @@ dialog {
   display: none;
 }
 
-/* One scroll surface keeps project navigation and saved tasks together. */
 aside > * {
   flex-shrink: 0;
-}
-aside:hover,
-aside:focus-within {
-  scrollbar-color: var(--hover-line) transparent;
-}
-aside::-webkit-scrollbar {
-  width: 5px;
-}
-aside::-webkit-scrollbar-thumb {
-  background: transparent;
-  border-radius: 20px;
-}
-aside:hover::-webkit-scrollbar-thumb,
-aside:focus-within::-webkit-scrollbar-thumb {
-  background: var(--hover-line);
 }
 aside .brand {
   gap: 10px;
@@ -1471,9 +1444,6 @@ aside .sidebar-footer {
     flex-basis: 44px;
     width: 44px;
     height: 44px;
-  }
-  aside {
-    scrollbar-color: var(--hover-line) transparent;
   }
 }
 @media (max-width: 900px) and (min-width: 651px) {
