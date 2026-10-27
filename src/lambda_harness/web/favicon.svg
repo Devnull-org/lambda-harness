@@ -1,0 +1,18 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <title>Lambda Harness</title>
+  <defs>
+    <linearGradient id="violet" x2="1" y2="1">
+      <stop stop-color="#9271bd" />
+      <stop offset="1" stop-color="#4d3c71" />
+    </linearGradient>
+  </defs>
+  <rect width="64" height="64" rx="16" fill="url(#violet)" />
+  <path
+    d="M21 17h4l18 30h4M32 29 21 47"
+    fill="none"
+    stroke="#fffaf4"
+    stroke-width="6.5"
+    stroke-linecap="round"
+    stroke-linejoin="round"
+  />
+</svg>

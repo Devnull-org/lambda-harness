@@ -905,6 +905,7 @@ def create_server(app, port=8765, *, phone=None):
                 "/app.js": "app.js",
                 "/theme.js": "theme.js",
                 "/style.css": "style.css",
+                "/favicon.svg": "favicon.svg",
                 "/fonts/Geist.woff2": "fonts/Geist.woff2",
                 "/fonts/JetBrainsMono.woff2": "fonts/JetBrainsMono.woff2",
             }
@@ -928,6 +929,7 @@ def create_server(app, port=8765, *, phone=None):
                 "app.js": "text/javascript; charset=utf-8",
                 "theme.js": "text/javascript; charset=utf-8",
                 "style.css": "text/css; charset=utf-8",
+                "favicon.svg": "image/svg+xml",
                 "fonts/Geist.woff2": "font/woff2",
                 "fonts/JetBrainsMono.woff2": "font/woff2",
             }
