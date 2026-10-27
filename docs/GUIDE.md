@@ -417,6 +417,16 @@ Enter adds a newline. **Send** or Ctrl/Command+Enter sends the message. Use **St
 model** to interrupt generation, **Edit previous message** to revise it, or
 **Retry unchanged** to repeat it. Only an approval button approves work.
 
+Codex can also request runtime access, such as permission to read a network
+source or run a command outside its default sandbox. The request appears in this
+task's conversation with the reason, command or destination, and requested access.
+Choose **Approve request** or **Deny request** to let the same model turn continue.
+The permission bell rings when a new request arrives, including in another task.
+**Stop model** cancels a pending request. These decisions do not approve a code
+patch, and approving a patch does not grant runtime access. No permanent access
+rule is saved. Other providers without a native approval connection still report
+their restrictions as part of the response.
+
 Saved tasks appear in the sidebar. **Resume** returns to an unfinished phase or
 its pending gate. **Start a fresh attempt** preserves the old task and creates a
 new worktree from its original pinned base.

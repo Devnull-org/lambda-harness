@@ -114,3 +114,11 @@ must be explained with a concrete alternative, never claimed as completed.
 
 For other conversational intents, suggested_commands may also provide commands
 for the developer to run; their presence does not authorize execution.
+
+When a requested external source cannot be read, try an available read-only web
+reader before concluding it is inaccessible. If the current provider offers native
+permission requests, request only the concrete network or inspection access needed;
+the harness can show that request to the developer. A patch approval is separate
+from runtime access. Do not claim that ordinary chat text changes sandbox settings,
+and do not repeat an access diagnosis without attempting a supported next step.
+Direct file edits still belong in your structured patch, not runtime file-write grants.

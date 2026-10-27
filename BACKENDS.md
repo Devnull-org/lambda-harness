@@ -31,7 +31,7 @@ for a saved task. Switching providers keeps the conversation and approval gates.
 | Profile | Behavior |
 | --- | --- |
 | `local` | Saved-session CLI integration with read-only inspection. |
-| `codex` | Saved CLI authentication, read-only shell access, ephemeral sessions, and no interactive approval prompts. |
+| `codex` | Saved CLI authentication, read-only shell access, ephemeral sessions, and native permission requests in task chat. |
 | `claude-code` | Read/search tools, plan mode, structured output, and no inherited MCP servers. |
 
 The default Nix launcher and development shell include all three providers.
@@ -48,13 +48,34 @@ Automatic selection applies one chosen profile to every role for the server sess
 Use a named configuration default without an explicit backend choice on the website
 to retain per-role routing.
 
-The Codex adapter sends the prompt and role schema through stdin and validates the
-final stdout response. It uses `--ephemeral`, `--sandbox read-only`, and
-`--ask-for-approval never`. `--ignore-user-config` and `--ignore-rules` skip personal
-settings and execpolicy rules while keeping the existing home directory and
-`CODEX_HOME` for authentication. API-key and access-token overrides are omitted
-from the child environment. Personal gateway requirements need a custom profile.
-The adapter's status probe checks login; it does not establish remaining quota.
+The Codex web adapter uses the local CLI's
+[app-server protocol](https://learn.chatgpt.com/docs/app-server) with ephemeral
+sessions, a read-only sandbox, live web search, and `on-request` approvals directed
+to the user. It passes the selected model explicitly and disables provider model
+fallback. Native command, network, and additional-access requests appear in the
+same task's conversation. Approve or deny returns a decision to the waiting model
+turn; it does not start another generation. Grants apply to the pending request
+(or the current turn for additional access), never a saved session-wide rule.
+Stopping the model cancels its pending request. Direct file-edit requests are
+rejected because the harness applies structured patches through its review gates.
+
+Runtime access and patch approval are separate. Approving a patch does not change
+network permissions. The provider may read public sources with its web tool without
+needing shell network access. App-server loads the normal CLI configuration; the
+harness explicitly sets its model, sandbox, approval policy, and reviewer for each
+thread. Provider-enforced restrictions still apply.
+
+Backend availability checks without a browser approval handler retain the one-shot
+`exec` transport: `--ephemeral`, `--sandbox read-only`, `--ask-for-approval never`,
+`--ignore-user-config`, and `--ignore-rules`. Both transports keep the existing home
+directory and `CODEX_HOME` for authentication and omit API-key/access-token
+overrides from the child environment. Personal gateway requirements need a custom
+profile. The status probe checks login; it does not establish remaining quota.
+Custom Codex profiles can opt into native approvals with
+`approval_command = ["{executable}", "app-server", "--listen", "stdio://"]`.
+This transport requires a CLI supporting the current app-server protocol; an
+unsupported protocol reports a backend error rather than silently removing the
+approval channel.
 
 The Claude Code adapter uses headless structured output. LangGraph owns durable
 workflow state, so switching backend does not require migrating provider sessions.

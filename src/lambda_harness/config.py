@@ -66,6 +66,7 @@ class RoutedAgent:
         progress=None,
         activity=None,
         cancellation=None,
+        approval=None,
     ):
         if backend not in {None, "auto"} and backend not in settings.backends:
             raise ValueError(f"Unknown backend {backend!r}; choose a profile in Project settings")
@@ -75,6 +76,7 @@ class RoutedAgent:
         self.timeout = timeout
         self.progress = progress
         self.activity = activity
+        self.approval = approval
         self.cancellation = cancellation
         self.last_generation = None
 
@@ -99,6 +101,7 @@ class RoutedAgent:
             progress=self.progress,
             activity=self.activity,
             cancellation=self.cancellation,
+            approval=self.approval,
         )
 
     def __call__(self, role, context, cwd):

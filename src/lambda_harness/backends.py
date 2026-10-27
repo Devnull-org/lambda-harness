@@ -55,8 +55,9 @@ class Backend(Record):
     probe_reject_patterns: list[str] = Field(default_factory=list)
     models_command: list[str] = Field(default_factory=list)
     models_format: Literal["json", "lines", "codex", "claude"] = "json"
+    approval_command: list[str] = Field(default_factory=list)
 
-    @field_validator("command", "probe", "model_args", "models_command")
+    @field_validator("command", "probe", "model_args", "models_command", "approval_command")
     @classmethod
     def valid_arguments(cls, value):
         if any("\x00" in argument for argument in value):
@@ -134,6 +135,7 @@ class CommandAgent:
         progress=None,
         activity=None,
         cancellation=None,
+        approval=None,
     ):
         self.backend = backend
         self.name = name
@@ -142,6 +144,7 @@ class CommandAgent:
         self.timeout = timeout if timeout is not None else backend.timeout
         self.progress = progress
         self.activity = activity
+        self.approval = approval
         self.cancellation = cancellation
         Backend.positive_timeout(self.timeout)
 
@@ -187,7 +190,7 @@ class CommandAgent:
     def _request_once(self, role, context, cwd, prompt, schema, cancel):
         replacements = {"{schema}": json.dumps(schema), "{model}": self.model, "{role}": role}
         arguments = list(self.backend.command)
-        if self.model is not None:
+        if self.model is not None and not (self.approval and self.backend.approval_command):
             if self.backend.model_args:
                 arguments += self.backend.model_args
             elif self.backend.input_format != "json" and "{model}" not in arguments:
@@ -231,21 +234,47 @@ class CommandAgent:
         )
         try:
             with indicator:
-                code, stdout, stderr = run_process(
-                    command,
-                    cwd,
-                    timeout=self.timeout,
-                    stdin=request,
-                    env=self.environment(),
-                    cancel=cancel,
-                    progress=(
-                        lambda elapsed: self.progress(
-                            f"Backend {self.name!r}: {label} still running ({elapsed:.0f}s elapsed)"
-                        )
+                if self.approval and self.backend.approval_command:
+                    from .codex_session import run_session
+
+                    argv = [
+                        (self.executable(cwd) or self.backend.command[0])
+                        if arg == "{executable}"
+                        else arg
+                        for arg in self.backend.approval_command
+                    ]
+                    stdout, reported_model = run_session(
+                        argv,
+                        cwd,
+                        prompt=prompt,
+                        schema=schema,
+                        model=self.model,
+                        env=self.environment(),
+                        timeout=self.timeout,
+                        cancel=cancel,
+                        approve=self.approval,
+                        progress=self.progress,
                     )
-                    if self.progress and not self.activity
-                    else None,
-                )
+                    code, stderr = 0, ""
+                    if reported_model:
+                        stderr = f"model: {reported_model}\n"
+                else:
+                    code, stdout, stderr = run_process(
+                        command,
+                        cwd,
+                        timeout=self.timeout,
+                        stdin=request,
+                        env=self.environment(),
+                        cancel=cancel,
+                        progress=(
+                            lambda elapsed: self.progress(
+                                f"Backend {self.name!r}: {label} still running "
+                                f"({elapsed:.0f}s elapsed)"
+                            )
+                        )
+                        if self.progress and not self.activity
+                        else None,
+                    )
         except ProcessError as error:
             if error.kind == "cancelled":
                 raise AgentInterrupted() from error

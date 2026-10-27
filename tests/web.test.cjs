@@ -3399,3 +3399,112 @@ test("activity logs remain available below chat without a floating panel or dupl
     1,
   );
 });
+
+function runtimeControls(ui) {
+  return ui.elements
+    .get("history")
+    .children.find((n) => n.className === "message runtime-permission")
+    ?.children.find((n) => n.className === "button-row").children;
+}
+
+for (const decision of ["approve", "deny"]) {
+  test(`runtime ${decision} reaches the pending job without starting another generation`, async () => {
+    const current = snapshot();
+    current.job = {
+      id: "job-one",
+      task_id: "example",
+      running: true,
+      log: [],
+      permission: {
+        id: "request-one",
+        method: "item/commandExecution/requestApproval",
+        details: {
+          reason: "Read the linked issue",
+          command: "gh issue view 2913",
+          cwd: "/task",
+          networkApprovalContext: { host: "github.com", protocol: "https" },
+        },
+      },
+    };
+    const posts = [];
+    let finish;
+    const ui = await app({
+      fetcher: async (path, options) => {
+        if (options?.method === "POST") {
+          posts.push({ path, body: JSON.parse(options.body) });
+          await new Promise((resolve) => {
+            finish = resolve;
+          });
+          delete current.job.permission;
+          return response({ accepted: true });
+        }
+        return response(current);
+      },
+    });
+    assert.match(
+      ui.elements.get("history").textContent,
+      /Read the linked issue/,
+    );
+    assert.match(ui.elements.get("history").textContent, /gh issue view 2913/);
+    assert.match(ui.elements.get("history").textContent, /github.com/);
+    const controls = runtimeControls(ui);
+    assert(controls.every((n) => !n.disabled));
+    const click = controls[decision === "approve" ? 0 : 1].onclick();
+    await settle();
+    assert(runtimeControls(ui).every((n) => n.disabled));
+    await controls[0].onclick();
+    assert.equal(posts.length, 1);
+    assert.deepEqual(posts[0], {
+      path: "/api/approval",
+      body: {
+        task_id: "example",
+        job_id: "job-one",
+        request_id: "request-one",
+        decision,
+      },
+    });
+    finish();
+    await click;
+    assert.equal(runtimeControls(ui), undefined);
+  });
+}
+
+test("native permission bells announce background jobs once without leaking their controls", async () => {
+  const { Audio, sounds } = bellAudio();
+  const current = snapshot();
+  current.jobs = [
+    {
+      id: "other-job",
+      task_id: "other",
+      running: true,
+      permission_id: "request-one",
+    },
+  ];
+  const ui = await app({
+    audio: Audio,
+    fetcher: async () => response(current),
+  });
+  await ui.gesture();
+  assert.equal(sounds.length, 1);
+  assert.equal(runtimeControls(ui), undefined);
+  await ui.run("refresh()");
+  assert.equal(sounds.length, 1);
+  current.jobs[0].permission_id = "request-two";
+  await ui.run("refresh()");
+  assert.equal(sounds.length, 2);
+  current.job = {
+    ...current.jobs[0],
+    task_id: "example",
+    permission: {
+      id: "request-three",
+      method: "item/permissions/requestApproval",
+      details: {
+        permissions: { network: { enabled: true } },
+        reason: "Read sources",
+      },
+    },
+  };
+  current.stopping = true;
+  await ui.run("refresh()");
+  assert(runtimeControls(ui).every((n) => n.disabled));
+});

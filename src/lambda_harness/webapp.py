@@ -47,6 +47,7 @@ class LocalApp:
         self.jobs = {}
         self.cancellations = {}
         self.workers = []
+        self.permission_waiters = {}
         self.worker = None
         self.cancellation = ModelCancellation()
         self.shutdown = threading.Event()
@@ -233,6 +234,60 @@ class LocalApp:
                 return False
             return self.cancellations[task_id].stop()
 
+    def request_permission(self, job, request, cancel):
+        request_id = secrets.token_hex(16)
+        event = threading.Event()
+        permission = {"id": request_id, **copy.deepcopy(request)}
+        with self.lock:
+            job["permission"] = permission
+            self.permission_waiters[request_id] = {"event": event, "decision": None}
+        self.progress("Waiting for your permission in this task's conversation", job)
+        try:
+            while not event.wait(0.1):
+                if self.shutdown.is_set() or (cancel is not None and cancel.is_set()):
+                    return False
+            with self.lock:
+                allowed = self.permission_waiters[request_id]["decision"] == "approve"
+            self.progress(
+                "Permission approved for this request"
+                if allowed
+                else "Permission denied; agent may try another approach",
+                job,
+            )
+            return allowed
+        finally:
+            with self.lock:
+                self.permission_waiters.pop(request_id, None)
+                job.pop("permission", None)
+
+    def decide_permission(self, body):
+        for key in ("task_id", "job_id", "request_id", "decision"):
+            if not isinstance(body.get(key), str):
+                raise ValueError("Choose a task permission request and decision")
+        if body["decision"] not in {"approve", "deny"}:
+            raise ValueError("Choose approve or deny")
+        with self.lock:
+            job = self.jobs.get(body["task_id"])
+            if (
+                not job
+                or not job["running"]
+                or job["id"] != body["job_id"]
+                or (job.get("permission") or {}).get("id") != body["request_id"]
+            ):
+                raise ValueError("This permission request is no longer pending; refresh the task")
+            waiter = self.permission_waiters.get(body["request_id"])
+            cancellation = self.cancellations[body["task_id"]]
+            if (
+                not waiter
+                or waiter["event"].is_set()
+                or self.shutdown.is_set()
+                or (cancellation.active is not None and cancellation.active.is_set())
+            ):
+                raise ValueError("This permission request has already been resolved or stopped")
+            waiter["decision"] = body["decision"]
+            waiter["event"].set()
+        return {"accepted": True}
+
     def harness(self, agent=None, *, cancellation=None, progress=None):
         return Harness(
             self.args.repo,
@@ -266,6 +321,7 @@ class LocalApp:
                 {
                     **{key: job[key] for key in ("id", "task_id", "running", "error")},
                     "scope_task_id": name,
+                    "permission_id": (job.get("permission") or {}).get("id"),
                 }
                 for name, job in self.jobs.items()
             ]
@@ -478,6 +534,7 @@ class LocalApp:
                 timeout=self.args.agent_timeout,
                 progress=progress,
                 cancellation=cancellation,
+                approval=lambda request, cancel: self.request_permission(job, request, cancel),
             )
             action, task_id = command["command"], command["task_id"]
             if self.shutdown.is_set():
@@ -923,6 +980,8 @@ def create_server(app, port=8765, *, phone=None):
                 self.send(200, app.select_agent_repository(body))
             elif self.path == "/api/agents/assign":
                 self.send(200, app.assign_agent(body))
+            elif self.path == "/api/approval":
+                self.send(200, app.decide_permission(body))
             elif self.path == "/api/stop":
                 self.send(200, {"stopping": app.stop(body.get("task_id"), body.get("job_id"))})
             elif self.path in {

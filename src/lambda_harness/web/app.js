@@ -53,10 +53,20 @@ async function unlockPermissionAudio() {
   }
 }
 function notifyPermissions(snapshot) {
-  for (const task of snapshot.tasks || []) {
+  const requests = [
+    ...(snapshot.tasks || []),
+    ...(snapshot.jobs || [])
+      .filter((job) => job.permission_id)
+      .map((job) => ({
+        task_id: job.scope_task_id || job.task_id,
+        permission_request: job.permission_id,
+        runtime: true,
+      })),
+  ];
+  for (const task of requests) {
     if (
       !(task.permission_request || task.attention_request) ||
-      jobFor(task.task_id, snapshot)?.running
+      (!task.runtime && jobFor(task.task_id, snapshot)?.running)
     )
       continue;
     const key = JSON.stringify([
@@ -800,11 +810,13 @@ function render() {
     item.append(
       el(
         "small",
-        jobFor(task.task_id)?.running
-          ? "Working…"
-          : jobFor(task.task_id)?.error
-            ? "Operation stopped"
-            : task.outcome?.title || stageLabel(task.stage),
+        jobFor(task.task_id)?.permission_id || jobFor(task.task_id)?.permission
+          ? "Permission requested"
+          : jobFor(task.task_id)?.running
+            ? "Working…"
+            : jobFor(task.task_id)?.error
+              ? "Operation stopped"
+              : task.outcome?.title || stageLabel(task.stage),
       ),
     );
     const remove = button(
@@ -909,6 +921,8 @@ function responseProgress(taskId) {
   if (!sending && !working) return null;
   if (connectionError) return "Connection lost · reconnecting…";
   if (state.stopping || stopPending()) return "Stopping…";
+  if (working && currentJob()?.permission)
+    return "Waiting for your permission…";
   if (!working) return "Sending…";
   if (state.activity_kind === "validation") return "Running checks…";
   return currentJob().operation === "review_action" ? "Working…" : "Thinking…";
@@ -985,6 +999,79 @@ function renderCheckResults(parent, result) {
     );
     parent.append(changes);
   }
+}
+const pendingPermissionDecisions = new Set();
+function runtimePermissionCard(task) {
+  const job = currentJob(),
+    request = job?.permission;
+  if (!request || job.task_id !== task.task_id) return null;
+  const details = request.details;
+  const network = details.networkApprovalContext;
+  const entry = message(
+    network
+      ? "Agent · Network permission requested"
+      : "Agent · Additional permission requested",
+    details.reason || "The agent needs your decision before continuing.",
+  );
+  entry.className = "message runtime-permission";
+  if (network)
+    section(entry, "Network destination", JSON.stringify(network, null, 2));
+  if (details.command) section(entry, "Command", details.command);
+  if (details.cwd) section(entry, "Working directory", details.cwd);
+  if (details.permissions || details.additionalPermissions)
+    section(
+      entry,
+      "Requested access",
+      JSON.stringify(
+        details.permissions || details.additionalPermissions,
+        null,
+        2,
+      ),
+    );
+  entry.append(
+    prose(
+      request.method === "item/permissions/requestApproval"
+        ? "Approval grants the listed access for this model turn only."
+        : network
+          ? "Approval allows this pending network request; no permanent rule is saved."
+          : "Approval permits this command with the requested access, which may extend beyond the sandbox. No permanent rule is saved.",
+    ),
+  );
+  const controls = el("div", undefined, "button-row");
+  for (const [decision, label] of [
+    ["approve", "Approve request"],
+    ["deny", "Deny request"],
+  ]) {
+    const control = button(
+      label,
+      async () => {
+        if (pendingPermissionDecisions.has(request.id)) return;
+        pendingPermissionDecisions.add(request.id);
+        renderHistory(task);
+        try {
+          await api("/api/approval", {
+            task_id: task.task_id,
+            job_id: job.id,
+            request_id: request.id,
+            decision,
+          });
+          await refresh();
+        } finally {
+          pendingPermissionDecisions.delete(request.id);
+          if (state?.task?.task_id === selected) renderHistory(state.task);
+        }
+      },
+      decision === "approve" ? "primary" : "quiet",
+    );
+    control.disabled =
+      pendingPermissionDecisions.has(request.id) ||
+      !!connectionError ||
+      stopPending() ||
+      !!state.stopping;
+    controls.append(control);
+  }
+  entry.append(controls);
+  return entry;
 }
 function permissionCard(task) {
   if (task.stage !== "test_change_review") return null;
@@ -1071,6 +1158,8 @@ function renderHistory(task) {
     pending,
     task.review_actions,
     task.stage === "test_change_review" ? task.prompt : null,
+    currentJob()?.permission,
+    pendingPermissionDecisions.has(currentJob()?.permission?.id),
     connectionError,
     handoffBusy,
     submitting,
@@ -1217,6 +1306,8 @@ function renderHistory(task) {
     entry.append(el("small", pending.status, "message-status"));
     history.append(entry);
   }
+  const runtimePermission = runtimePermissionCard(task);
+  if (runtimePermission) history.append(runtimePermission);
   const permission = permissionCard(task);
   if (permission) history.append(permission);
   if (progress) {
@@ -1224,7 +1315,13 @@ function renderHistory(task) {
     entry.role = "status";
     entry.ariaLive = "polite";
     entry.append(
-      el("span", progress, connectionError ? "muted" : "thinking-indicator"),
+      el(
+        "span",
+        progress,
+        connectionError || currentJob()?.permission
+          ? "muted"
+          : "thinking-indicator",
+      ),
     );
     history.append(entry);
   }
@@ -1289,7 +1386,11 @@ function renderTask(task, running) {
     : working
       ? {
           kind: "running",
-          title: state.stopping ? "Stopping…" : "Working…",
+          title: state.stopping
+            ? "Stopping…"
+            : currentJob()?.permission
+              ? "Permission requested"
+              : "Working…",
           detail: currentJob().log.at(-1) || "Starting the selected action…",
         }
       : operationError

@@ -12,6 +12,7 @@ probe = ["{executable}", "status"]
 probe_reject_patterns = ["not logged in"]
 
 [backends.codex]
+approval_command = ["{executable}", "app-server", "--listen", "stdio://"]
 models_command = ["{executable}", "app-server"]
 models_format = "codex"
 command = ["codex", "--ask-for-approval", "never", "exec", "--sandbox", "read-only", "--color", "never", "--ephemeral", "--ignore-user-config", "--ignore-rules", "-"]
