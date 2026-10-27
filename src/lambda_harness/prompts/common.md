@@ -12,13 +12,17 @@ When test_strategy=existing, the developer chose to reuse the current coverage.
 The harness checks that baseline before coding. Keep every patch green, including
 intermediate patches. When implementing or refactoring, include needed test or
 configuration changes in your patch and explain why using permission_request.
-The developer can approve the exact patch in the UI. Test-author proposals use
+The developer can approve the exact patch in the conversation. Test-author proposals use
 their normal test review flow. Do not silently weaken tests to hide failures.
 
 Implementers and refactorers can set permission_request on any patch needing a developer
 decision. Explain the reason, scope, and consequence. Tests, protected Cabal settings,
 and build/validation configuration automatically request permission. Approval
 authorizes only that exact patch; future changes may require another decision.
+When additional permission is needed, return the concrete proposed patch with
+permission_request rather than only asking in prose or claiming you cannot proceed.
+The harness displays your reason, affected files, and approval choices in chat.
+Do not treat a question or a request to revise the proposal as approval.
 After approval, use the new validation results to continue implementation.
 
 Use read-only inspection. Do not edit files, run builds, install dependencies, create

@@ -747,7 +747,6 @@ async function refresh() {
     if (requestId !== refreshId || taskId !== selected) return;
     connectionError = e.message;
     error("Unable to refresh: " + e.message + " Retrying automatically…");
-    $("activity-spinner").hidden = true;
     if (state?.task?.task_id === selected) renderHistory(state.task);
   } finally {
     if (requestId === refreshId && taskId === selected)
@@ -844,37 +843,21 @@ function render() {
   renderMemory(projectBusy);
   renderModelPicker();
   if (state.task?.task_id === selected) renderTask(state.task, busy);
-  $("activity").hidden = page !== "workspace" || !currentJob();
-  $("activity").dataset.running = String(running);
-  $("activity-spinner").hidden = !running || !!connectionError;
+  $("activity-log").hidden = !currentJob()?.log?.length;
   $("composer-stop").hidden = !running || currentJob().task_id !== selected;
-  $("stop").hidden = !running;
-  for (const id of ["stop", "composer-stop"]) {
-    $(id).disabled = !state.can_stop || stopPending() || !!connectionError;
-    $(id).textContent =
-      state.stopping || stopPending()
-        ? "Stopping…"
-        : state.activity_kind === "validation"
-          ? "■ Stop checks"
-          : currentJob()?.operation === "review_action"
-            ? "■ Stop action"
-            : "■ Stop model";
-  }
+  $("composer-stop").disabled =
+    !state.can_stop || stopPending() || !!connectionError;
+  $("composer-stop").textContent =
+    state.stopping || stopPending()
+      ? "Stopping…"
+      : state.activity_kind === "validation"
+        ? "■ Stop checks"
+        : currentJob()?.operation === "review_action"
+          ? "■ Stop action"
+          : "■ Stop model";
   if (currentJob()) {
     const job = currentJob();
-    $("activity-label").textContent = running
-      ? "Working on " + job.task_id
-      : job.error
-        ? "Operation stopped"
-        : job.result?.outcome?.title || "Latest activity";
-    $("activity-message").textContent = running
-      ? job.log.at(-1) || "Preparing…"
-      : job.error ||
-        job.result?.outcome?.detail ||
-        job.log.at(-1) ||
-        "Operation finished.";
     $("log").textContent = job.log.join("\n");
-    $("stop").hidden = !running;
     if (!running && !seenJob.has(job.id)) {
       seenJob.add(job.id);
       if (job.result?.stage === "agent_ready") guard(loadAgents);
@@ -1003,6 +986,72 @@ function renderCheckResults(parent, result) {
     parent.append(changes);
   }
 }
+function permissionCard(task) {
+  if (task.stage !== "test_change_review") return null;
+  const prompt = task.prompt;
+  const entry = message(
+    "Agent · Permission requested",
+    prompt.permission_reason || prompt.explanation || prompt.summary,
+  );
+  entry.className = "message permission-request";
+  entry.append(
+    prose(
+      "Approval applies only to this proposed patch. The harness will apply it and run validation.",
+    ),
+  );
+  if (prompt.permission_files?.length)
+    section(
+      entry,
+      "Affected files",
+      prompt.permission_files
+        .map((file) => `${file.operation}: ${file.path}`)
+        .join("\n"),
+    );
+  else if (prompt.blocked_paths?.length)
+    section(entry, "Affected files", prompt.blocked_paths.join("\n"));
+  if (prompt.diff) {
+    const details = el("details");
+    details.append(
+      el("summary", "Review proposed changes"),
+      diffView(prompt.diff),
+    );
+    entry.append(details);
+  }
+  const controls = el("div", undefined, "button-row");
+  const busy =
+    submitting || !!currentJob()?.running || !!connectionError || handoffBusy;
+  for (const action of [
+    "approve_changes",
+    "deny_changes",
+    "revise_changes",
+    "question",
+  ]) {
+    if (!prompt.actions.includes(action)) continue;
+    const control = button(
+      labels[action],
+      () => {
+        if (selected !== task.task_id) return;
+        if (["question", "revise_changes"].includes(action)) {
+          $("message-action").value = action;
+          $("message").focus();
+          return;
+        }
+        return command({
+          command: "respond",
+          task_id: task.task_id,
+          action,
+          token: prompt.approval_token,
+          text: action === "deny_changes" ? $("message").value : "",
+        });
+      },
+      action === "approve_changes" ? "primary" : "quiet",
+    );
+    control.disabled = busy;
+    controls.append(control);
+  }
+  entry.append(controls);
+  return entry;
+}
 function renderHistory(task) {
   const messages = task.messages || [];
   const progress = responseProgress(task.task_id);
@@ -1021,6 +1070,9 @@ function renderHistory(task) {
     messages,
     pending,
     task.review_actions,
+    task.stage === "test_change_review" ? task.prompt : null,
+    connectionError,
+    handoffBusy,
     submitting,
     currentJob()?.running,
     progress,
@@ -1165,6 +1217,8 @@ function renderHistory(task) {
     entry.append(el("small", pending.status, "message-status"));
     history.append(entry);
   }
+  const permission = permissionCard(task);
+  if (permission) history.append(permission);
   if (progress) {
     const entry = el("div", undefined, "message response-progress");
     entry.role = "status";
@@ -1340,18 +1394,6 @@ function renderTask(task, running) {
     const packet = $("packet"),
       notes = $("exploration-notes");
     packet.replaceChildren();
-    if (task.stage === "test_change_review") {
-      const legacyRevision = (task.messages || []).findLast(
-        (item) =>
-          item.question &&
-          item.proposal_digest &&
-          item.answer === prompt.answer,
-      );
-      if (prompt.patch_revision || legacyRevision)
-        packet.append(
-          patchReceipt(prompt.patch_revision || legacyRevision.patch_revision),
-        );
-    }
     notes.replaceChildren();
     if (prompt.definition) {
       renderAgentDefinition(packet, prompt.definition, task.agent_id);
@@ -1407,23 +1449,8 @@ function renderTask(task, running) {
         renderCheckResults(packet, task.check_results);
     }
     renderSuggestedCommands(packet, prompt.suggested_commands);
-    if (prompt.explanation) packet.append(prose(prompt.explanation));
-    if (prompt.permission_reason)
-      section(packet, "Why permission is needed", prompt.permission_reason);
-    if (prompt.permission_files)
-      section(
-        packet,
-        "Proposed files",
-        prompt.permission_files
-          .map((file) => `${file.operation}: ${file.path}`)
-          .join("\n"),
-      );
-    if (prompt.blocked_paths?.length)
-      section(
-        packet,
-        "Files requiring permission",
-        prompt.blocked_paths.join("\n"),
-      );
+    if (prompt.explanation && task.stage !== "test_change_review")
+      packet.append(prose(prompt.explanation));
     const interview = (task.messages || []).findLast(
       (item) => item.role === "interviewer",
     );
@@ -1494,7 +1521,7 @@ function renderTask(task, running) {
           .map(([id, tests]) => `${id}: ${tests.join(", ")}`)
           .join("\n"),
       );
-    if (prompt.diff) {
+    if (prompt.diff && task.stage !== "test_change_review") {
       packet.append(
         el(
           "h3",
@@ -1572,7 +1599,14 @@ function renderTask(task, running) {
   $("edit-previous").hidden = !prompt.draft;
   $("edit-previous").disabled = running;
   $("actions").replaceChildren();
-  for (const action of actions.filter((a) => !textActions.includes(a))) {
+  for (const action of actions.filter(
+    (a) =>
+      !textActions.includes(a) &&
+      !(
+        task.stage === "test_change_review" &&
+        ["approve_changes", "deny_changes"].includes(a)
+      ),
+  )) {
     const label =
       action === "approve"
         ? task.stage === "test_review"
@@ -2290,7 +2324,7 @@ async function stopWork() {
     render();
   }
 }
-$("stop").onclick = $("composer-stop").onclick = () => guard(stopWork);
+$("composer-stop").onclick = () => guard(stopWork);
 $("resume").onclick = () =>
   guard(() => command({ command: "resume", task_id: selected }));
 $("choose-backend").onclick = () =>
@@ -2561,7 +2595,6 @@ function renderPage() {
   $("new-panel").hidden = !workspace || !!selected;
   $("work").hidden =
     !workspace || !selected || state?.task?.task_id !== selected;
-  $("activity").hidden = !workspace || !currentJob();
   $("selection").hidden = !workspace || !currentJob()?.selection;
   $("choose-backend").hidden = !workspace || !state?.task;
   for (const [name, info] of Object.entries(pages)) {

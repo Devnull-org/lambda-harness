@@ -238,7 +238,8 @@ Its transcript is also saved as `chat.md` in the report directory.
 
 After sending a question, a **Thinking…** indicator appears in the conversation
 until the response arrives. It also shows sending, stopping, or connection loss.
-Use **Stop model** beside **Send** or in the pinned activity panel to interrupt it.
+Use **Stop model** beside **Send** below the chat to interrupt it.
+Open **Activity log** below the message box for detailed progress.
 Your conversation is saved; edit your instructions or retry when ready. During
 validation, the same button becomes **Stop checks**. This saves partial logs and
 pauses the task without triggering repairs. Use **Recheck** to run the checks again.
@@ -375,7 +376,7 @@ After specification approval, choose the step that fits the task:
 
 Coding agents can request permission for a proposed patch by explaining why a
 decision is needed. Changes to tests, protected Cabal settings, or build and
-validation configuration automatically request permission. The UI shows the reason,
+validation configuration automatically request permission. A card in the conversation shows the reason,
 affected files, and complete proposed diff before any part of the patch is applied.
 Choose **Approve changes and continue** to apply that exact patch and validate it,
 **Deny and revise** to continue without the denied changes, or **Request changes**

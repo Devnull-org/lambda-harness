@@ -1440,7 +1440,7 @@ test("a thinking indicator appears while sending and stays until the response fi
   accept(response({}));
   await pending;
   assert.match(indicator().textContent, /Thinking/);
-  assert.equal(ui.elements.get("activity-spinner").hidden, false);
+  assert.equal(ui.elements.has("activity-spinner"), false);
   current.stopping = true;
   await ui.run("refresh()");
   assert.match(indicator().textContent, /Stopping/);
@@ -1449,7 +1449,7 @@ test("a thinking indicator appears while sending and stays until the response fi
   current.task.messages.push({ role: "chat", answer: "The answer" });
   await ui.run("refresh()");
   assert.equal(indicator(), undefined);
-  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.has("activity-spinner"), false);
   assert.match(ui.elements.get("history").textContent, /The answer/);
 });
 
@@ -1480,20 +1480,22 @@ for (const kind of ["model", "validation"]) {
     });
     ui.run("render()");
     const stop = ui.elements.get("composer-stop");
-    const topStop = ui.elements.get("stop");
+    assert.equal(ui.elements.has("stop"), false);
     assert.equal(stop.hidden, false);
     assert.equal(stop.disabled, false);
     assert.match(
       stop.textContent,
       kind === "model" ? /Stop model/ : /Stop checks/,
     );
-    assert.equal(ui.elements.get("activity").dataset.running, "true");
+    assert.match(
+      ui.elements.get("history").textContent,
+      /Thinking|Running checks/,
+    );
     ui.elements.get("message").value = "Keep my revised instructions";
     const pending = stop.onclick();
     assert.equal(stop.disabled, true);
-    assert.equal(topStop.disabled, true);
     assert.equal(stop.textContent, "Stopping…");
-    await topStop.onclick();
+    await stop.onclick();
     assert.equal(requests, 1);
     current.can_stop = false;
     current.stopping = true;
@@ -1508,7 +1510,6 @@ for (const kind of ["model", "validation"]) {
     current.stopping = false;
     await ui.run("refresh()");
     assert.equal(stop.hidden, true);
-    assert.equal(topStop.hidden, true);
     assert.equal(ui.elements.get("send").disabled, false);
     assert.equal(
       ui.elements.get("message").value,
@@ -1530,8 +1531,8 @@ test("another task does not show activity or block this conversation", async () 
   const ui = await app({ fetcher: async () => response(current) });
   ui.run("render()");
   assert.equal(ui.elements.get("composer-stop").hidden, true);
-  assert.equal(ui.elements.get("activity").hidden, true);
-  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.has("activity"), false);
+  assert.equal(ui.elements.has("activity-spinner"), false);
   assert.equal(ui.elements.get("send").disabled, false);
   assert.equal(ui.elements.get("new-task").disabled, false);
 });
@@ -1558,7 +1559,7 @@ test("thinking status handles connection loss, other tasks, and backend errors",
   await ui.run("refresh()");
   assert.match(indicator().textContent, /Connection lost/);
   assert.notEqual(indicator().children[0].className, "thinking-indicator");
-  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.has("activity-spinner"), false);
   ui.fetch(async () => response(current));
   await ui.run("refresh()");
   assert.match(indicator().textContent, /Thinking/);
@@ -1572,7 +1573,7 @@ test("thinking status handles connection loss, other tasks, and backend errors",
   ui.run('selected = "example"');
   await ui.run("refresh()");
   assert.equal(indicator(), undefined);
-  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.has("activity-spinner"), false);
 });
 
 test("a failed poll retries and keeps the draft", async () => {
@@ -2186,7 +2187,7 @@ function assertOnlyPage(ui, visible, title) {
       `${id} on ${title}`,
     );
   assert.equal(ui.elements.get("title").textContent, title);
-  for (const id of ["activity", "selection", "choose-backend"])
+  for (const id of ["selection", "choose-backend"])
     assert.equal(
       ui.elements.get(id).hidden,
       true,
@@ -2519,10 +2520,10 @@ test("blocked code patches expose an implementation continuation with its approv
   ui.run("selected = 'example'");
   await ui.run("refresh()");
   assert.match(
-    ui.elements.get("packet").textContent,
+    ui.elements.get("history").textContent,
     /patch has not been applied/,
   );
-  assert.match(ui.elements.get("packet").textContent, /example-app.cabal/);
+  assert.match(ui.elements.get("history").textContent, /example-app.cabal/);
   const control = ui.elements
     .get("actions")
     .children.find(
@@ -2570,11 +2571,13 @@ for (const [action, label] of [
     });
     ui.run("selected = 'example'");
     await ui.run("refresh()");
-    assert.match(ui.elements.get("packet").textContent, /dependency needed/);
-    assert.match(ui.elements.get("packet").textContent, /write: example-app/);
-    assert.match(ui.elements.get("packet").textContent, /\+    servant/);
+    assert.match(ui.elements.get("history").textContent, /dependency needed/);
+    assert.match(ui.elements.get("history").textContent, /write: example-app/);
+    assert.match(ui.elements.get("history").textContent, /\+    servant/);
     const control = ui.elements
-      .get("actions")
+      .get("history")
+      .children.find((n) => n.className === "message permission-request")
+      .children.find((n) => n.className === "button-row")
       .children.find((n) => n.textContent === label);
     assert(control);
     await control.onclick();
@@ -2596,7 +2599,7 @@ for (const [revision, title, detail] of [
   [{ changed_files: [] }, "Patch unchanged", "no file changes"],
   [undefined, "Patch proposal received", "returned a patch proposal"],
 ]) {
-  test(`patch revision receipt shows ${title} in conversation and beside diff`, async () => {
+  test(`patch revision receipt shows ${title} in conversation with the proposed diff`, async () => {
     const ui = await app();
     const reply = {
       question: "Add comments to the handlers.",
@@ -2619,14 +2622,14 @@ for (const [revision, title, detail] of [
     ui.fetch(async () => response(snapshot(current)));
     ui.run("selected = 'example'");
     await ui.run("refresh()");
-    for (const id of ["history", "packet"]) {
+    for (const id of ["history"]) {
       const text = ui.elements.get(id).textContent;
       assert(text.includes(title));
       assert(text.includes(detail));
       assert(text.includes("requires approval"));
     }
     assert(ui.elements.get("history").textContent.includes("Done."));
-    assert(ui.elements.get("packet").textContent.includes("+-- GET /config"));
+    assert(ui.elements.get("history").textContent.includes("+-- GET /config"));
   });
 }
 
@@ -2843,7 +2846,7 @@ test("task status distinguishes a saved failure, running work, and success", asy
   await ui.run("refresh()");
   assert.equal(ui.elements.get("task-outcome").dataset.kind, "success");
   assert.match(
-    ui.elements.get("activity-message").textContent,
+    ui.elements.get("task-outcome").textContent,
     /Implementation complete/,
   );
 });
@@ -3204,7 +3207,7 @@ test("task switches isolate activity, drafts, completion, model choices and stop
   assert.equal(ui.elements.get("message").value, "Draft for second");
   await ui.run('selectTask("example"); refresh()');
   assert.equal(ui.elements.get("message").value, "Draft for first");
-  assert.equal(ui.elements.get("activity-spinner").hidden, true);
+  assert.equal(ui.elements.has("activity-spinner"), false);
   assert.equal(ui.elements.get("send").disabled, false);
   assert.equal(ui.elements.get("log").textContent, "example log");
   assert.equal(
@@ -3234,7 +3237,7 @@ test("another task can receive a message while the first is running", async () =
   await ui.run('respond("question")');
   assert.equal(posted.task_id, "example");
   assert.equal(posted.text, "Explore this task");
-  assert.equal(ui.elements.get("activity").hidden, true);
+  assert.equal(ui.elements.has("activity"), false);
   assert.equal(ui.elements.get("export-project").disabled, true);
 });
 
@@ -3260,7 +3263,7 @@ test("switching tasks hides stale activity before the new snapshot arrives", asy
   ];
   const ui = await app({ fetcher: async () => response(first) });
   ui.run('selectTask("second"); showPage("workspace")');
-  assert.equal(ui.elements.get("activity").hidden, true);
+  assert.equal(ui.elements.has("activity"), false);
   assert.equal(ui.elements.get("work").hidden, true);
 });
 
@@ -3288,4 +3291,111 @@ test("a delayed message submission cannot clear another task draft or show its e
   await ui.run('selectTask("example"); refresh()');
   assert.equal(ui.elements.get("message").value, "First task question");
   assert.match(ui.elements.get("error").textContent, /First task failed/);
+});
+
+function permissionControls(ui) {
+  return ui.elements
+    .get("history")
+    .children.find((n) => n.className === "message permission-request")
+    .children.find((n) => n.className === "button-row").children;
+}
+
+test("chat permission controls revise without approval and bind approval to the reviewed patch", async () => {
+  const current = snapshot({
+    ...task(),
+    stage: "test_change_review",
+    prompt: {
+      summary: "Permission requested",
+      permission_reason: "Change the public endpoint behavior",
+      permission_files: [{ operation: "write", path: "src/Server.hs" }],
+      diff: "+new endpoint",
+      actions: [
+        "approve_changes",
+        "deny_changes",
+        "revise_changes",
+        "question",
+      ],
+      approval_token: "first-patch",
+    },
+  });
+  const commands = [];
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") {
+        commands.push(JSON.parse(options.body));
+        return response({ accepted: true });
+      }
+      return response(current);
+    },
+  });
+  assert.equal(commands.length, 0);
+  assert.equal(ui.elements.get("actions").children.length, 0);
+  assert.match(
+    ui.elements.get("history").textContent,
+    /Change the public endpoint behavior/,
+  );
+  assert.doesNotMatch(
+    ui.elements.get("packet").textContent,
+    /Change the public endpoint behavior/,
+  );
+  const approve = permissionControls(ui).find(
+    (n) => n.textContent === "Approve changes and continue",
+  );
+  await permissionControls(ui)
+    .find((n) => n.textContent === "Request changes")
+    .onclick();
+  assert.equal(ui.elements.get("message-action").value, "revise_changes");
+  assert.equal(commands.length, 0);
+  await permissionControls(ui)
+    .find((n) => n.textContent === "Ask a question")
+    .onclick();
+  assert.equal(ui.elements.get("message-action").value, "question");
+  assert.equal(commands.length, 0);
+  current.task.prompt = {
+    ...current.task.prompt,
+    approval_token: "second-patch",
+    permission_reason: "Revised request",
+  };
+  await ui.run("refresh()");
+  assert.match(ui.elements.get("history").textContent, /Revised request/);
+  assert.doesNotMatch(
+    ui.elements.get("history").textContent,
+    /Change the public endpoint behavior/,
+  );
+  await approve.onclick();
+  assert.equal(commands[0].token, "first-patch"); // Server rejects stale approvals, never grants the new patch.
+  assert.equal(commands[0].task_id, "example");
+  current.job = { id: "running", task_id: "example", running: true, log: [] };
+  await ui.run("refresh()");
+  assert(permissionControls(ui).every((n) => n.disabled));
+  assert.equal(
+    ui.elements
+      .get("history")
+      .children.filter((n) => n.className === "message permission-request")
+      .length,
+    1,
+  );
+});
+
+test("activity logs remain available below chat without a floating panel or duplicate stop", async () => {
+  const current = snapshot();
+  current.job = {
+    id: "job",
+    task_id: "example",
+    running: true,
+    log: ["Inspecting this task"],
+  };
+  const ui = await app({ fetcher: async () => response(current) });
+  assert.equal(ui.elements.has("activity"), false);
+  assert.equal(ui.elements.has("activity-spinner"), false);
+  assert.equal(ui.elements.has("stop"), false);
+  assert.equal(ui.elements.get("activity-log").hidden, false);
+  assert.equal(ui.elements.get("log").textContent, "Inspecting this task");
+  assert.equal(
+    ui.elements
+      .get("history")
+      .children.filter((n) => n.className === "message response-progress")
+      .length,
+    1,
+  );
 });

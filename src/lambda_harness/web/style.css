@@ -460,8 +460,7 @@ select:focus {
   margin-bottom: 22px;
 }
 .form-footer,
-.compose-top,
-.activity-top {
+.compose-top {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -642,34 +641,28 @@ summary {
   margin: 12px 0;
   font-weight: 400;
 }
-#activity .activity-top {
-  margin: 0;
+#activity-log {
+  margin-block: 14px;
+  color: var(--muted);
 }
-#activity[data-running="true"] {
-  position: sticky;
-  top: 12px;
-  z-index: 5;
-}
-#activity .activity-top strong {
-  min-width: 0;
-  overflow-wrap: anywhere;
-}
-#activity .stop {
-  flex-shrink: 0;
-}
-#activity #log {
+#activity-log #log {
   max-height: 25vh;
   overflow: auto;
+}
+.permission-request {
+  border: 1px solid var(--accent);
+}
+.permission-request .button-row {
+  margin-top: 14px;
+}
+.permission-request details {
+  margin-block: 12px;
 }
 .composer-buttons {
   display: flex;
   flex-wrap: wrap;
   justify-content: flex-end;
   gap: 9px;
-}
-#activity-message {
-  margin: 8px 0;
-  font-size: 13px;
 }
 .task-footer {
   display: flex;
@@ -1190,8 +1183,7 @@ dialog {
   white-space: pre-wrap;
 }
 .transfer-busy::before,
-.thinking-indicator::before,
-#activity-spinner::before {
+.thinking-indicator::before {
   content: "";
   display: inline-block;
   width: 0.8em;
@@ -1209,8 +1201,7 @@ dialog {
 }
 @media (prefers-reduced-motion: reduce) {
   .transfer-busy::before,
-  .thinking-indicator::before,
-  #activity-spinner::before {
+  .thinking-indicator::before {
     animation: none;
   }
 }

@@ -172,20 +172,6 @@
         </div>
       </header>
       <div id="error" role="alert" hidden></div>
-      <section id="activity" class="panel" hidden aria-live="polite">
-        <div class="activity-top">
-          <strong
-            ><span id="activity-spinner" aria-hidden="true" hidden></span
-            ><span id="activity-label">Working…</span></strong
-          >
-          <button id="stop" class="stop">■ Stop model</button>
-        </div>
-        <p id="activity-message" class="muted"></p>
-        <details>
-          <summary>Activity log</summary>
-          <pre id="log"></pre>
-        </details>
-      </section>
       <section id="projects-page" hidden aria-label="Projects">
         <div class="agents-intro">
           <div>
@@ -721,6 +707,10 @@
             </div>
           </div>
         </section>
+        <details id="activity-log" hidden>
+          <summary>Activity log</summary>
+          <pre id="log"></pre>
+        </details>
         <div id="packet" class="panel"></div>
         <section id="exploration-notes" class="panel" hidden></section>
       </section>
