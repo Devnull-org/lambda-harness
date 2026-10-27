@@ -2403,7 +2403,39 @@ $("task-checks").onclick = () =>
   guard(() => command({ command: "task_checks", task_id: selected }));
 $("latest-message").onclick = scrollToLatestMessage;
 $("send").onclick = () => guard(() => respond($("message-action").value));
+function recallLastMessage() {
+  const field = $("message"),
+    task = state?.task;
+  if (field.value || field.disabled || !task || task.task_id !== selected)
+    return false;
+  const previous = [...(task.messages || [])]
+    .reverse()
+    .find((item) => item.text || item.question);
+  const text =
+    (pendingMessage?.task_id === selected && pendingMessage.text) ||
+    task.prompt?.draft ||
+    previous?.text ||
+    previous?.question ||
+    task.request;
+  if (!text) return false;
+  field.value = text;
+  field.setSelectionRange(text.length, text.length);
+  taskDrafts.set(taskScope(), text);
+  return true;
+}
 $("message").onkeydown = (e) => {
+  if (
+    e.key === "ArrowUp" &&
+    !e.ctrlKey &&
+    !e.metaKey &&
+    !e.altKey &&
+    !e.shiftKey &&
+    !e.isComposing &&
+    recallLastMessage()
+  ) {
+    e.preventDefault();
+    return;
+  }
   if (e.key === "Enter" && (e.ctrlKey || e.metaKey) && !$("send").disabled) {
     e.preventDefault();
     $("send").click();

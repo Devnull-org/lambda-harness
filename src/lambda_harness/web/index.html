@@ -688,6 +688,7 @@
             <textarea
               id="message"
               rows="5"
+              aria-describedby="message-help"
               placeholder="Ask a follow-up or describe what should change."
             ></textarea>
             <div class="composer-toolbar">
@@ -697,8 +698,9 @@
                   aria-label="Message action"
                   hidden
                 ></select>
-                <small class="muted"
-                  >Enter adds a line · Ctrl/⌘ + Enter sends</small
+                <small id="message-help" class="muted"
+                  >↑ in an empty box recalls your last message · Ctrl/⌘ + Enter
+                  sends</small
                 >
               </div>
               <div class="composer-buttons">

@@ -59,6 +59,10 @@ class Element {
   select() {
     this.selected = true;
   }
+  setSelectionRange(start, end) {
+    this.selectionStart = start;
+    this.selectionEnd = end;
+  }
   click() {
     this.onclick?.();
   }
@@ -3556,3 +3560,74 @@ for (const mobile of [false, true]) {
     assert.equal(history.lastElementChild.scrollCalls, undefined);
   });
 }
+
+test("Arrow Up restores the latest human message without sending or overwriting a draft", async () => {
+  const current = snapshot();
+  current.task.messages = [
+    { text: "Earlier message" },
+    { question: "My latest\nmultiline question", answer: "Assistant response" },
+    { answer: "More assistant output" },
+  ];
+  const posts = [];
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (options?.method === "POST") posts.push(path);
+      return response(current);
+    },
+  });
+  const field = ui.elements.get("message");
+  let prevented = 0;
+  const press = (extra = {}) =>
+    field.onkeydown({
+      key: "ArrowUp",
+      preventDefault() {
+        prevented++;
+      },
+      ...extra,
+    });
+  press();
+  assert.equal(field.value, "My latest\nmultiline question");
+  assert.equal(field.selectionStart, field.value.length);
+  assert.equal(field.selectionEnd, field.value.length);
+  assert.equal(prevented, 1);
+  assert.deepEqual(posts, []);
+  field.value = "Unsent draft\nsecond line";
+  press();
+  assert.equal(field.value, "Unsent draft\nsecond line");
+  assert.equal(prevented, 1);
+  field.value = "";
+  for (const modifier of [
+    "ctrlKey",
+    "metaKey",
+    "altKey",
+    "shiftKey",
+    "isComposing",
+  ])
+    press({ [modifier]: true });
+  assert.equal(field.value, "");
+  assert.equal(prevented, 1);
+});
+
+test("Arrow Up uses the selected task and can recall pending or initial messages", async () => {
+  let current = snapshot();
+  const ui = await app({ fetcher: async () => response(current) });
+  const field = ui.elements.get("message");
+  const press = () => field.onkeydown({ key: "ArrowUp", preventDefault() {} });
+  await ui.run('selectTask("other")');
+  press();
+  assert.equal(field.value, ""); // The previous task is still in the response snapshot.
+  current = snapshot({
+    ...task("other"),
+    messages: [],
+    request: "Other task's initial request",
+  });
+  await ui.run("refresh()");
+  press();
+  assert.equal(field.value, "Other task's initial request");
+  field.value = "";
+  await ui.run('pendingMessage = {task_id: "other", text: "Just sent"}');
+  press();
+  assert.equal(field.value, "Just sent");
+  await ui.run('selectTask("example"); selectTask("other")');
+  assert.equal(field.value, "Just sent");
+});
