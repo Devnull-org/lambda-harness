@@ -683,28 +683,30 @@
               Edit previous message
             </button>
           </div>
-          <textarea
-            id="message"
-            rows="5"
-            placeholder="Ask a follow-up or describe what should change."
-          ></textarea>
           <div id="findings"></div>
-          <div class="form-footer">
-            <div>
-              <select
-                id="message-action"
-                aria-label="Message action"
-                hidden
-              ></select
-              ><small class="muted"
-                >Enter adds a line · Ctrl/⌘ + Enter sends</small
-              >
-            </div>
-            <div class="composer-buttons">
-              <button id="composer-stop" class="stop" hidden>
-                ■ Stop model
-              </button>
-              <button id="send" class="primary">Send →</button>
+          <div class="message-entry">
+            <textarea
+              id="message"
+              rows="5"
+              placeholder="Ask a follow-up or describe what should change."
+            ></textarea>
+            <div class="composer-toolbar">
+              <div class="composer-options">
+                <select
+                  id="message-action"
+                  aria-label="Message action"
+                  hidden
+                ></select>
+                <small class="muted"
+                  >Enter adds a line · Ctrl/⌘ + Enter sends</small
+                >
+              </div>
+              <div class="composer-buttons">
+                <button id="composer-stop" class="stop" hidden>
+                  ■ Stop model
+                </button>
+                <button id="send" class="primary">Send →</button>
+              </div>
             </div>
           </div>
         </section>

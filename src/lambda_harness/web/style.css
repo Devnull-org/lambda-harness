@@ -461,7 +461,8 @@ select:focus {
 .compose-top {
   margin: 0;
 }
-.form-footer small {
+.form-footer small,
+.composer-toolbar small {
   display: block;
   font-size: 11px;
   margin-top: 6px;
@@ -1515,6 +1516,41 @@ aside .local-dot {
 
 #composer {
   margin-top: 18px;
+}
+.message-entry {
+  margin-top: 10px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--field);
+}
+.message-entry:focus-within {
+  border-color: var(--accent);
+}
+#composer #message {
+  margin: 0;
+  border: 0;
+  border-radius: 12px 12px 0 0;
+  background: transparent;
+}
+.composer-toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  padding: 10px 12px 12px;
+}
+.composer-options {
+  flex: 1 1 220px;
+  min-width: 0;
+}
+.composer-options select {
+  max-width: 100%;
+}
+.composer-toolbar .composer-buttons {
+  margin-left: auto;
+}
+.composer-toolbar button {
+  white-space: nowrap;
 }
 .generation-receipt {
   display: block;
