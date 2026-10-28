@@ -320,29 +320,84 @@ async function api(path, body) {
     clearTimeout(deadline);
   }
 }
+function codeBlock(text, language = "", content = null) {
+  const source = String(text),
+    block = el("div", undefined, "code-block"),
+    header = el("div", undefined, "code-block-header"),
+    status = el("small", "", "muted"),
+    code = content || el("pre");
+  if (!content) code.append(el("code", source));
+  code.tabIndex = 0;
+  status.role = "status";
+  status.ariaLive = "polite";
+  const copy = button(
+    "Copy",
+    async () => {
+      copy.disabled = true;
+      try {
+        if (!globalThis.navigator?.clipboard?.writeText)
+          throw new Error("Clipboard unavailable");
+        await globalThis.navigator.clipboard.writeText(source);
+        status.textContent = "Copied";
+      } catch {
+        code.focus();
+        const selection = globalThis.getSelection?.();
+        if (selection && document.createRange) {
+          const range = document.createRange();
+          range.selectNodeContents(code);
+          selection.removeAllRanges();
+          selection.addRange(range);
+        }
+        status.textContent = "Select the code and copy it manually.";
+      } finally {
+        copy.disabled = false;
+      }
+    },
+    "quiet",
+  );
+  copy.type = "button";
+  copy.ariaLabel = "Copy code";
+  header.append(
+    el("span", language.trim() || "Code", "code-language"),
+    status,
+    copy,
+  );
+  block.append(header, code);
+  return block;
+}
 function prose(text) {
   const node = el("div", undefined, "prose");
-  let code = null;
-  for (const line of String(text).split("\n")) {
-    if (line.startsWith("```")) {
-      if (code) {
-        node.append(code);
-        code = null;
-      } else code = el("pre", "");
+  let fence = null,
+    language = "",
+    source = "";
+  for (const line of String(text).match(/[^\n]*\n|[^\n]+$/g) || []) {
+    if (fence) {
+      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*\r?\n?$/);
+      if (
+        closing &&
+        closing[1][0] === fence[0] &&
+        closing[1].length >= fence.length
+      ) {
+        node.append(codeBlock(source, language));
+        fence = null;
+        source = "";
+      } else source += line;
       continue;
     }
-    if (code) {
-      code.textContent += line + "\n";
+    const opening = line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)\r?\n?$/);
+    if (opening && !(opening[1][0] === "`" && opening[2].includes("`"))) {
+      fence = opening[1];
+      language = opening[2].trim().split(/\s+/)[0];
       continue;
     }
     const heading = line.match(/^#{1,4}\s+(.+)/);
     if (heading) node.append(el("h3", heading[1]));
-    else node.append(document.createTextNode(line + "\n"));
+    else node.append(document.createTextNode(line));
   }
-  if (code) node.append(code);
+  if (fence) node.append(codeBlock(source, language));
   return node;
 }
-function section(parent, title, value) {
+function section(parent, title, value, language = "") {
   if (
     value === undefined ||
     value === null ||
@@ -352,7 +407,11 @@ function section(parent, title, value) {
     return;
   parent.append(el("h3", title));
   parent.append(
-    prose(typeof value === "string" ? value : JSON.stringify(value, null, 2)),
+    typeof value !== "string"
+      ? codeBlock(JSON.stringify(value, null, 2), "json")
+      : language
+        ? codeBlock(value, language)
+        : prose(value),
   );
 }
 function diffView(diff) {
@@ -391,7 +450,7 @@ function diffView(diff) {
     );
     if (line.endsWith("\n")) view.append(document.createTextNode("\n"));
   }
-  return view;
+  return codeBlock(diff, "diff", view);
 }
 function message(who, text, human = false) {
   const node = el("div", undefined, "message" + (human ? " human" : ""));
@@ -950,7 +1009,7 @@ function renderFailureDetails(parent, failures) {
     const details = el("details");
     details.append(
       el("summary", failure.check + " failure"),
-      el("pre", failure.output),
+      codeBlock(failure.output, "text"),
     );
     parent.append(details);
   }
@@ -960,7 +1019,7 @@ function renderSuggestedCommands(parent, commands) {
   const section = el("section", undefined, "suggested-commands");
   section.append(el("h3", "Suggested commands · run yourself"));
   for (const item of commands) {
-    section.append(prose(item.explanation), el("pre", item.command));
+    section.append(prose(item.explanation), codeBlock(item.command, "sh"));
   }
   parent.append(section);
 }
@@ -976,12 +1035,12 @@ function renderCheckResults(parent, result) {
         `${passed ? "Passed" : "Failed / stopped"}: ${command.name}`,
       ),
     );
-    details.append(el("pre", (command.argv || []).join(" ")));
+    details.append(codeBlock((command.argv || []).join(" "), "sh"));
     if (command.files_changed)
       details.append(prose("This command changed files in the worktree."));
     if (command.error) details.append(prose(command.error));
     details.append(
-      el("pre", (command.stdout || "") + "\n" + (command.stderr || "")),
+      codeBlock((command.stdout || "") + "\n" + (command.stderr || ""), "text"),
     );
     parent.append(details);
   }
@@ -1014,19 +1073,14 @@ function runtimePermissionCard(task) {
     details.reason || "The agent needs your decision before continuing.",
   );
   entry.className = "message runtime-permission";
-  if (network)
-    section(entry, "Network destination", JSON.stringify(network, null, 2));
-  if (details.command) section(entry, "Command", details.command);
+  if (network) section(entry, "Network destination", network);
+  if (details.command) section(entry, "Command", details.command, "sh");
   if (details.cwd) section(entry, "Working directory", details.cwd);
   if (details.permissions || details.additionalPermissions)
     section(
       entry,
       "Requested access",
-      JSON.stringify(
-        details.permissions || details.additionalPermissions,
-        null,
-        2,
-      ),
+      details.permissions || details.additionalPermissions,
     );
   entry.append(
     prose(
@@ -1532,7 +1586,7 @@ function renderTask(task, running) {
             "strong",
             command.name + (command.modifies_files ? " · rewrites files" : ""),
           ),
-          el("pre", command.argv.join(" ")),
+          codeBlock(command.argv.join(" "), "sh"),
           prose(command.purpose),
           el(
             "small",
@@ -1654,7 +1708,7 @@ function renderTask(task, running) {
         for (const name of ["lint", "build", "nix", "test"])
           setup.append(
             el("strong", name),
-            el("pre", knowledge.checks[name].join(" ")),
+            codeBlock(knowledge.checks[name].join(" "), "sh"),
           );
       section(
         setup,
@@ -1914,7 +1968,7 @@ function showContext(snapshot) {
   $("context-documents").replaceChildren();
   for (const source of snapshot?.documents || []) {
     const details = el("details");
-    details.append(el("summary", source.path), el("pre", source.content));
+    details.append(el("summary", source.path), codeBlock(source.content));
     $("context-documents").append(details);
   }
   if (!snapshot?.documents.length)
@@ -2016,7 +2070,7 @@ async function previewMemory(forTask) {
     const details = el("details");
     details.append(el("summary", source.path));
     if (source.excerpt !== undefined) {
-      details.append(el("pre", source.excerpt));
+      details.append(codeBlock(source.excerpt));
       if (source.truncated)
         details.append(
           el("p", "Excerpt limited to the first 4,000 characters.", "muted"),

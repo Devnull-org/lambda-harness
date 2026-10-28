@@ -3631,3 +3631,98 @@ test("Arrow Up uses the selected task and can recall pending or initial messages
   await ui.run('selectTask("example"); selectTask("other")');
   assert.equal(field.value, "Just sent");
 });
+
+function copyControl(block) {
+  return block.children[0].children.find((node) => node.tagName === "button");
+}
+function copyStatus(block) {
+  return block.children[0].children.find((node) => node.role === "status");
+}
+
+test("fenced code has a dedicated block and copies exact code without labels or fences", async () => {
+  const copies = [];
+  const ui = await app({
+    clipboard: { writeText: async (text) => copies.push(text) },
+  });
+  const source = 'main = do\n  putStrLn "<script>not HTML</script>"\n\n';
+  const content = ui.run(
+    `prose(${JSON.stringify("Example:\n```haskell\n" + source + "```\nThen run:\n~~~sh\ncabal test\n~~~\nDone.")})`,
+  );
+  const blocks = content.children.filter(
+    (node) => node.className === "code-block",
+  );
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].children[0].children[0].textContent, "haskell");
+  assert.equal(blocks[0].children[1].tagName, "pre");
+  assert.equal(blocks[0].children[1].children[0].tagName, "code");
+  assert.equal(blocks[0].children[1].textContent, source);
+  await copyControl(blocks[0]).onclick();
+  await copyControl(blocks[1]).onclick();
+  assert.deepEqual(copies, [source, "cabal test\n"]);
+  assert.equal(copyStatus(blocks[0]).textContent, "Copied");
+  assert.equal(copyControl(blocks[0]).disabled, false);
+});
+
+test("longer fences retain embedded backticks and unfinished blocks retain their last line", async () => {
+  const ui = await app();
+  const source = "```sh\necho hello\n```\n";
+  const content = ui.run(
+    `prose(${JSON.stringify("````markdown\n" + source + "````\n```haskell\nvalue = 1")})`,
+  );
+  const blocks = content.children.filter(
+    (node) => node.className === "code-block",
+  );
+  assert.equal(blocks.length, 2);
+  assert.equal(blocks[0].children[1].textContent, source);
+  assert.equal(blocks[1].children[1].textContent, "value = 1");
+});
+
+for (const clipboard of [
+  undefined,
+  {
+    writeText: async () => {
+      throw new Error("Denied");
+    },
+  },
+]) {
+  test(`code remains available for manual copying when clipboard is ${clipboard ? "denied" : "missing"}`, async () => {
+    const ui = await app({ clipboard });
+    const block = ui.run('codeBlock("example code", "text")');
+    await copyControl(block).onclick();
+    assert.match(copyStatus(block).textContent, /copy it manually/);
+    assert.equal(block.children[1].textContent, "example code");
+    assert.equal(copyControl(block).disabled, false);
+    assert.equal(ui.elements.get("error").hidden, true);
+  });
+}
+
+test("diffs keep their colors and copy their exact patch; suggested commands use code blocks", async () => {
+  let copied;
+  const ui = await app({
+    clipboard: {
+      writeText: async (text) => {
+        copied = text;
+      },
+    },
+  });
+  const diff = "--- a/Test.hs\n+++ b/Test.hs\n@@ -1 +1 @@\n-old\n+new\n";
+  const block = ui.run(`diffView(${JSON.stringify(diff)})`);
+  const view = block.children[1];
+  assert.equal(view.className, "diff-view");
+  assert(
+    view.children.some((node) => node.className === "diff-line diff-added"),
+  );
+  assert(
+    view.children.some((node) => node.className === "diff-line diff-removed"),
+  );
+  await copyControl(block).onclick();
+  assert.equal(copied, diff);
+  const commands = ui.run(
+    '(() => { const parent = el("div"); renderSuggestedCommands(parent, [{explanation:"Run tests",command:"just test"}]); return parent; })()',
+  );
+  const command = commands.children[0].children.find(
+    (node) => node.className === "code-block",
+  );
+  await copyControl(command).onclick();
+  assert.equal(copied, "just test");
+});

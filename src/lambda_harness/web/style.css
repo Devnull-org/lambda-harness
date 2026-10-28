@@ -1557,3 +1557,41 @@ aside .local-dot {
   margin-top: 12px;
   font-size: 11px;
 }
+
+.code-block {
+  margin-block: 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--soft);
+  white-space: normal;
+}
+.code-block-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--line);
+}
+.code-language {
+  flex: 1;
+  min-width: 0;
+  color: var(--muted);
+  font: 12px var(--font-mono);
+  overflow-wrap: anywhere;
+}
+.code-block-header button {
+  flex-shrink: 0;
+  margin-left: auto;
+  padding: 5px 12px;
+}
+.code-block pre {
+  margin: 0;
+  max-height: none;
+  overflow: visible;
+  border-radius: 0 0 10px 10px;
+}
+.code-block code {
+  font: inherit;
+  white-space: inherit;
+}
