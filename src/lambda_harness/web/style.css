@@ -579,8 +579,8 @@ select {
   background: var(--panel);
 }
 .message.human {
-  background: var(--human);
-  border-color: var(--human-line);
+  background: var(--soft);
+  border-color: var(--line);
   margin-left: 40px;
 }
 .message .eyebrow {
@@ -1580,10 +1580,9 @@ aside .local-dot {
 }
 .message-entry {
   margin-top: 10px;
-  border: 1px solid var(--human-line);
+  border: 1px solid var(--line);
   border-radius: 12px;
-  background: var(--soft);
-  color: var(--ink);
+  background: var(--field);
 }
 .message-entry:focus-within {
   border-color: var(--accent);
@@ -1593,12 +1592,6 @@ aside .local-dot {
   border: 0;
   border-radius: 12px 12px 0 0;
   background: transparent;
-  color: var(--ink);
-  caret-color: var(--accent);
-}
-#composer #message::placeholder {
-  color: var(--muted);
-  opacity: 1;
 }
 .composer-toolbar {
   display: flex;
