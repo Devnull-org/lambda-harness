@@ -1580,9 +1580,10 @@ aside .local-dot {
 }
 .message-entry {
   margin-top: 10px;
-  border: 1px solid var(--line);
+  border: 1px solid var(--human-line);
   border-radius: 12px;
-  background: var(--field);
+  background: var(--soft);
+  color: var(--ink);
 }
 .message-entry:focus-within {
   border-color: var(--accent);
@@ -1592,6 +1593,12 @@ aside .local-dot {
   border: 0;
   border-radius: 12px 12px 0 0;
   background: transparent;
+  color: var(--ink);
+  caret-color: var(--accent);
+}
+#composer #message::placeholder {
+  color: var(--muted);
+  opacity: 1;
 }
 .composer-toolbar {
   display: flex;
