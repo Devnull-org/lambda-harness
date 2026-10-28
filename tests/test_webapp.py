@@ -675,6 +675,7 @@ def test_browser_rejects_foreign_sites_and_unauthenticated_api_access(browser_ap
     assert call("/")[0] == 200
     assert "HARNESS_SESSION_TOKEN" not in call("/")[1]
     assert call("/app.js")[0] == 200
+    assert call("/vendor/marked.js")[0] == 200
     assert call("/../../README.md")[0] == 404
     assert call("/api/state?task=not-created-yet")[1]["task"] is None
 

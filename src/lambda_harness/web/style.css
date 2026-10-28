@@ -602,11 +602,76 @@ select {
   margin-top: 12px;
 }
 .prose {
-  white-space: pre-wrap;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 .prose p {
   margin: 8px 0 15px;
+}
+.prose > :first-child {
+  margin-top: 0;
+}
+.prose > :last-child {
+  margin-bottom: 0;
+}
+.prose :not(pre) > code {
+  font-family: var(--font-mono);
+  font-size: 0.9em;
+  color: var(--accent);
+  background: var(--soft);
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  padding: 1px 4px;
+}
+.prose strong {
+  font-weight: 700;
+}
+.prose ul,
+.prose ol {
+  padding-left: 1.5em;
+  margin: 10px 0;
+}
+.prose li {
+  margin: 5px 0;
+}
+.prose li > p {
+  margin: 5px 0;
+}
+.prose input[type="checkbox"] {
+  width: auto;
+  margin-right: 6px;
+}
+.prose blockquote {
+  margin: 12px 0;
+  padding: 2px 16px;
+  border-left: 3px solid var(--accent);
+  color: var(--muted);
+}
+.prose table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 12px 0;
+  table-layout: fixed;
+}
+.prose th,
+.prose td {
+  border: 1px solid var(--line);
+  padding: 8px;
+  text-align: left;
+}
+.prose th {
+  background: var(--soft);
+}
+.prose .align-center {
+  text-align: center;
+}
+.prose .align-right {
+  text-align: right;
+}
+.prose hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 16px 0;
 }
 .prose pre,
 pre {

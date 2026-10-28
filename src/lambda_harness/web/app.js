@@ -365,36 +365,142 @@ function codeBlock(text, language = "", content = null) {
   block.append(header, code);
   return block;
 }
+// Render lexer tokens as DOM nodes: agent HTML is always literal text, and
+// links only receive explicitly allowed protocols. Never inject parsed HTML.
+function markdownText(text) {
+  return text.replace(/&(?:#\d+|#x[\da-f]+|[a-z][\da-z]+);/gi, (entity) => {
+    const decoder = document.createElement("textarea");
+    decoder.innerHTML = entity;
+    return decoder.value;
+  });
+}
+function markdownNodes(parent, tokens) {
+  for (const token of tokens) {
+    let node;
+    switch (token.type) {
+      case "space":
+        continue;
+      case "code": {
+        // Marked drops the last newline of fenced code. Keep it for Copy,
+        // including blank trailing lines and unfinished streaming fences.
+        const opening = token.raw.match(/^ {0,3}(`{3,}|~{3,})[^\n]*\n/);
+        let source = token.text;
+        if (opening) {
+          const body = token.raw.slice(opening[0].length);
+          const closing = new RegExp(
+            "(?:^|\\n) {0,3}" +
+              opening[1][0] +
+              "{" +
+              opening[1].length +
+              ",}[ \\t]*\\n?$",
+          );
+          const end = body.match(closing);
+          if (end ? end[0].startsWith("\n") : body.endsWith("\n"))
+            source += "\n";
+        }
+        parent.append(codeBlock(source, (token.lang || "").split(/\s+/)[0]));
+        continue;
+      }
+      case "codespan":
+        parent.append(el("code", token.text));
+        continue;
+      case "html":
+        parent.append(document.createTextNode(token.text));
+        continue;
+      case "text":
+        if (token.tokens) markdownNodes(parent, token.tokens);
+        else parent.append(document.createTextNode(markdownText(token.text)));
+        continue;
+      case "escape":
+        parent.append(document.createTextNode(token.text));
+        continue;
+      case "image":
+      case "link": {
+        const href = markdownText(token.href).trim();
+        node = el(/^(https?:\/\/|mailto:)/i.test(href) ? "a" : "span");
+        if (node.tagName.toLowerCase() === "a") {
+          node.href = href;
+          node.target = "_blank";
+          node.rel = "noopener noreferrer";
+          if (token.title) node.title = markdownText(token.title);
+        }
+        if (token.type === "image") node.textContent = token.text || href;
+        else markdownNodes(node, token.tokens);
+        parent.append(node);
+        continue;
+      }
+      case "list":
+        node = el(token.ordered ? "ol" : "ul");
+        if (token.ordered) node.start = token.start;
+        for (const item of token.items) {
+          const li = el("li");
+          markdownNodes(li, item.tokens);
+          node.append(li);
+        }
+        parent.append(node);
+        continue;
+      case "checkbox":
+        node = el("input");
+        node.type = "checkbox";
+        node.checked = token.checked;
+        node.disabled = true;
+        node.ariaLabel = token.checked ? "Completed" : "Not completed";
+        parent.append(node);
+        continue;
+      case "table": {
+        node = el("table");
+        const head = el("thead"),
+          body = el("tbody");
+        for (const [index, cells] of [token.header, ...token.rows].entries()) {
+          const row = el("tr");
+          cells.forEach((cell, column) => {
+            const td = el(index === 0 ? "th" : "td");
+            if (token.align[column])
+              td.className = "align-" + token.align[column];
+            markdownNodes(td, cell.tokens);
+            row.append(td);
+          });
+          (index === 0 ? head : body).append(row);
+        }
+        node.append(head, body);
+        parent.append(node);
+        continue;
+      }
+      case "paragraph":
+        node = el("p");
+        break;
+      case "heading":
+        node = el("h" + Math.min(token.depth + 1, 6));
+        break;
+      case "blockquote":
+        node = el("blockquote");
+        break;
+      case "strong":
+        node = el("strong");
+        break;
+      case "em":
+        node = el("em");
+        break;
+      case "del":
+        node = el("del");
+        break;
+      case "br":
+        parent.append(el("br"), document.createTextNode("\n"));
+        continue;
+      case "hr":
+        node = el("hr");
+        break;
+      default:
+        parent.append(document.createTextNode(token.raw || ""));
+        continue;
+    }
+    if (token.tokens) markdownNodes(node, token.tokens);
+    parent.append(node);
+  }
+}
 function prose(text) {
   const node = el("div", undefined, "prose");
-  let fence = null,
-    language = "",
-    source = "";
-  for (const line of String(text).match(/[^\n]*\n|[^\n]+$/g) || []) {
-    if (fence) {
-      const closing = line.match(/^ {0,3}(`{3,}|~{3,})[ \t]*\r?\n?$/);
-      if (
-        closing &&
-        closing[1][0] === fence[0] &&
-        closing[1].length >= fence.length
-      ) {
-        node.append(codeBlock(source, language));
-        fence = null;
-        source = "";
-      } else source += line;
-      continue;
-    }
-    const opening = line.match(/^ {0,3}(`{3,}|~{3,})([^\r\n]*)\r?\n?$/);
-    if (opening && !(opening[1][0] === "`" && opening[2].includes("`"))) {
-      fence = opening[1];
-      language = opening[2].trim().split(/\s+/)[0];
-      continue;
-    }
-    const heading = line.match(/^#{1,4}\s+(.+)/);
-    if (heading) node.append(el("h3", heading[1]));
-    else node.append(document.createTextNode(line));
-  }
-  if (fence) node.append(codeBlock(source, language));
+  markdownNodes(node, marked.lexer(String(text), { gfm: true, breaks: true }));
   return node;
 }
 function section(parent, title, value, language = "") {

@@ -740,6 +740,10 @@ async function app({
     clearTimeout: (id) => timers.delete(id),
   });
   vm.runInContext(
+    readFileSync("src/lambda_harness/web/vendor/marked.js", "utf8"),
+    context,
+  );
+  vm.runInContext(
     readFileSync("src/lambda_harness/web/app.js", "utf8"),
     context,
   );
@@ -3741,4 +3745,90 @@ test("Tokyo Day is a persistent explicit light choice alongside Paper and Night"
   blocked.picker.value = "tokyo-day";
   blocked.picker.change();
   assert.equal(blocked.root.dataset.theme, "tokyo-day");
+});
+
+function descendants(node, tag) {
+  return node.children.flatMap((child) => [
+    ...(child.tagName === tag ? [child] : []),
+    ...descendants(child, tag),
+  ]);
+}
+
+test("agent replies render bold and inline code in the user's example", async () => {
+  const ui = await app();
+  const source =
+    "**Keep `allowed-assets` separate.** It describes which assets may be present, whereas `l2-minting` controls creating or burning assets inside the Head. Together, your example can permit transfers and admission of allowed existing assets while prohibiting all L2 minting. Do not map `allowed-assets` directly to `AllowOnlyPolicies`: that constructor permits minting under those policies.";
+  const content = ui.run(`prose(${JSON.stringify(source)})`);
+  assert.equal(
+    descendants(content, "strong")[0].textContent,
+    "Keep allowed-assets separate.",
+  );
+  assert.deepEqual(
+    descendants(content, "code").map((n) => n.textContent),
+    ["allowed-assets", "l2-minting", "allowed-assets", "AllowOnlyPolicies"],
+  );
+  assert.equal(
+    content.textContent,
+    source.replaceAll("**", "").replaceAll("`", ""),
+  );
+});
+
+test("Markdown supports headings, nested lists, quotes, tables, and reference links", async () => {
+  const ui = await app();
+  const source =
+    "## Plan\n\n3. *Explore*\n   - **Inspect**\n4. Test\n\n> ~~Old~~ New\n\n| Name | Result |\n| :--- | ---: |\n| `check` | pass |\n\n[Docs][ref]\n\n[ref]: https://example.com/docs\n\n- [x] Done\n- [ ] Next";
+  const content = ui.run(`prose(${JSON.stringify(source)})`);
+  assert.equal(descendants(content, "h3")[0].textContent, "Plan");
+  assert.equal(descendants(content, "ol")[0].start, 3);
+  assert.equal(descendants(content, "em")[0].textContent, "Explore");
+  assert.equal(descendants(content, "strong")[0].textContent, "Inspect");
+  assert.equal(descendants(content, "blockquote")[0].textContent, "Old New");
+  assert.equal(descendants(content, "del")[0].textContent, "Old");
+  assert.equal(descendants(content, "table").length, 1);
+  assert.equal(descendants(content, "td")[1].className, "align-right");
+  assert.equal(descendants(content, "a")[0].href, "https://example.com/docs");
+  const checks = descendants(content, "input");
+  assert.deepEqual(
+    checks.map((n) => n.checked),
+    [true, false],
+  );
+  assert(checks.every((n) => n.disabled));
+});
+
+test("Markdown keeps HTML inert, rejects executable links, and does not load remote images", async () => {
+  const ui = await app();
+  const source =
+    "<script>alert(1)</script>\n\n<img src=x onerror=alert(1)>\n\n[bad](javascript:alert%281%29) [bad](data:text/html,test) [good](https://example.com)\n\n![image](https://example.com/tracker.png)\n\n`**literal** <b>`";
+  const content = ui.run(`prose(${JSON.stringify(source)})`);
+  assert.equal(descendants(content, "script").length, 0);
+  assert.equal(descendants(content, "img").length, 0);
+  assert.match(content.textContent, /<script>alert\(1\)<\/script>/);
+  const links = descendants(content, "a");
+  assert.deepEqual(
+    links.map((n) => n.href),
+    ["https://example.com", "https://example.com/tracker.png"],
+  );
+  assert(links.every((n) => n.rel === "noopener noreferrer"));
+  assert.equal(descendants(content, "code")[0].textContent, "**literal** <b>");
+});
+
+test("Markdown escapes, unfinished emphasis, and code markers remain readable", async () => {
+  const ui = await app();
+  const content = ui.run(
+    `prose(${JSON.stringify("\\*literal\\* **unfinished\n\n``a ` b``")})`,
+  );
+  assert.match(content.textContent, /\*literal\* \*\*unfinished/);
+  assert.equal(descendants(content, "strong").length, 0);
+  assert.equal(descendants(content, "code")[0].textContent, "a ` b");
+});
+
+test("empty fences do not add a newline and nested fences preserve code for Copy", async () => {
+  const ui = await app();
+  const content = ui.run(
+    `prose(${JSON.stringify("```sh\n```\n\n- Example\n\n  ```sh\n  echo hello\n  ```")})`,
+  );
+  assert.deepEqual(
+    descendants(content, "pre").map((n) => n.textContent),
+    ["", "echo hello\n"],
+  );
 });
