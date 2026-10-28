@@ -831,6 +831,9 @@ dialog {
   margin-top: 0;
   color: var(--muted);
 }
+main > header {
+  flex-wrap: wrap;
+}
 .header-controls {
   display: flex;
   flex-wrap: wrap;
