@@ -841,15 +841,6 @@ main > header {
   justify-content: flex-end;
   gap: 12px;
 }
-.header-controls .theme-label {
-  padding: 6px 10px;
-  border: 1px solid var(--line);
-  border-radius: 10px;
-  background: var(--panel);
-}
-.header-controls .theme-label select {
-  max-width: 100%;
-}
 @media (max-width: 650px) {
   .header-controls {
     width: 100%;
@@ -1480,8 +1471,15 @@ aside .guide-link:hover {
   cursor: pointer;
 }
 .sidebar-preferences .theme-label {
+  display: grid;
+  justify-content: stretch;
+  gap: 6px;
   margin-top: 14px;
   font-size: 11px;
+}
+.sidebar-preferences .theme-label select {
+  width: 100%;
+  min-width: 0;
 }
 .sidebar-preferences #permission-sound {
   margin-top: 8px;
