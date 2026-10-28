@@ -1,6 +1,6 @@
 "use strict";
 (() => {
-  const choices = ["system", "light", "dark"];
+  const choices = ["system", "light", "tokyo-day", "dark"];
   let selected = "system";
   try {
     // Keep the appearance selected before the product was renamed.

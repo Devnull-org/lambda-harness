@@ -3726,3 +3726,19 @@ test("diffs keep their colors and copy their exact patch; suggested commands use
   await copyControl(command).onclick();
   assert.equal(copied, "just test");
 });
+
+test("Tokyo Day is a persistent explicit light choice alongside Paper and Night", () => {
+  const ui = theme("tokyo-day");
+  assert.equal(ui.root.dataset.theme, "tokyo-day");
+  assert.equal(ui.picker.value, "tokyo-day");
+  for (const choice of ["dark", "light", "system", "tokyo-day"]) {
+    ui.picker.value = choice;
+    ui.picker.change();
+    assert.equal(ui.root.dataset.theme, choice);
+    assert.equal(ui.saved(), choice);
+  }
+  const blocked = theme(null, true);
+  blocked.picker.value = "tokyo-day";
+  blocked.picker.change();
+  assert.equal(blocked.root.dataset.theme, "tokyo-day");
+});

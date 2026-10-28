@@ -120,14 +120,7 @@
       >
       <details class="sidebar-preferences">
         <summary>Preferences &amp; phone access</summary>
-        <label class="theme-label"
-          >Appearance
-          <select data-theme-picker aria-label="Appearance">
-            <option value="system">System</option>
-            <option value="light">Light</option>
-            <option value="dark">Dark</option>
-          </select>
-        </label>
+
         <button
           id="permission-sound"
           class="quiet"
@@ -165,7 +158,16 @@
           <span class="eyebrow">WORKSPACE</span>
           <h1 id="title">What would you like to work on?</h1>
         </div>
-        <div>
+        <div class="header-controls">
+          <label class="theme-label"
+            >Appearance
+            <select data-theme-picker aria-label="Appearance">
+              <option value="system">System</option>
+              <option value="light">Paper Light</option>
+              <option value="tokyo-day">Tokyo Day · Light</option>
+              <option value="dark">Tokyo Night · Dark</option>
+            </select>
+          </label>
           <span id="backend" class="badge">Automatic backend</span
           ><button id="choose-backend" class="quiet" hidden>
             Check backends and resume
