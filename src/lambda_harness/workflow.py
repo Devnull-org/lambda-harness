@@ -985,6 +985,11 @@ class Harness(CheckRunner):
                 role = message.get("role") or message.get("agent_role") or NODE_ROLES.get(name)
                 if role in generations and not message.get("text"):
                     message["generation"] = generations[role]
+                review_roles = message.get("reviews") or message.get("answers_by_role")
+                if review_roles:
+                    receipts = {r: generations[r] for r in review_roles if r in generations}
+                    if receipts:
+                        message["generations"] = receipts
             state["seq"] += 1
             save_json(journal, state)
             return state

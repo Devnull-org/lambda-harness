@@ -13,6 +13,7 @@ from typing import Literal
 from pydantic import Field, field_validator
 
 from .failures import AgentInterrupted, BackendError, BackendResponseError, failure_kind
+from .model_catalog import valid_effort
 from .process import ProcessError, run_process
 from .schemas import Record, schema_for, validate_response
 
@@ -48,6 +49,7 @@ class Backend(Record):
     input_format: Literal["prompt", "json"] = "prompt"
     response_fields: list[str] = Field(default_factory=list)
     model_args: list[str] = Field(default_factory=list)
+    effort_args: list[str] = Field(default_factory=list)
     model: str | None = None
     timeout: float = 600
     unset_env: list[str] = Field(default_factory=list)
@@ -57,7 +59,9 @@ class Backend(Record):
     models_format: Literal["json", "lines", "codex", "claude"] = "json"
     approval_command: list[str] = Field(default_factory=list)
 
-    @field_validator("command", "probe", "model_args", "models_command", "approval_command")
+    @field_validator(
+        "command", "probe", "model_args", "effort_args", "models_command", "approval_command"
+    )
     @classmethod
     def valid_arguments(cls, value):
         if any("\x00" in argument for argument in value):
@@ -131,6 +135,7 @@ class CommandAgent:
         *,
         name="custom",
         model=None,
+        effort=None,
         timeout=None,
         progress=None,
         activity=None,
@@ -140,6 +145,9 @@ class CommandAgent:
         self.backend = backend
         self.name = name
         self.model = model if model is not None else backend.model
+        if effort is not None and not valid_effort(effort):
+            raise ValueError("Choose a valid reasoning effort")
+        self.effort = effort
         self.reported_model = None
         self.timeout = timeout if timeout is not None else backend.timeout
         self.progress = progress
@@ -188,7 +196,13 @@ class CommandAgent:
             return result
 
     def _request_once(self, role, context, cwd, prompt, schema, cancel):
-        replacements = {"{schema}": json.dumps(schema), "{model}": self.model, "{role}": role}
+        replacements = {
+            "{schema}": json.dumps(schema),
+            "{model}": self.model,
+            "{role}": role,
+            "{effort}": self.effort,
+            "{effort_config}": "model_reasoning_effort=" + json.dumps(self.effort),
+        }
         arguments = list(self.backend.command)
         if self.model is not None and not (self.approval and self.backend.approval_command):
             if self.backend.model_args:
@@ -197,6 +211,13 @@ class CommandAgent:
                 raise ValueError(
                     f"Backend {self.name!r} has no model_args; configure model selection"
                 )
+        if self.effort is not None and not (self.approval and self.backend.approval_command):
+            if self.backend.effort_args:
+                if not {"{effort}", "{effort_config}"}.intersection(self.backend.effort_args):
+                    raise ValueError("effort_args must forward the selected effort")
+                arguments += self.backend.effort_args
+            elif self.backend.input_format != "json":
+                raise ValueError(f"Backend {self.name!r} does not support effort selection")
         command = []
         for argument in arguments:
             if argument in replacements:
@@ -213,6 +234,7 @@ class CommandAgent:
                     "version": 1,
                     "role": role,
                     "model": self.model,
+                    **({"effort": self.effort} if self.effort is not None else {}),
                     "prompt": prompt,
                     "schema": schema,
                     "context": context,
@@ -223,6 +245,7 @@ class CommandAgent:
         if self.progress:
             self.progress(
                 f"Backend {self.name!r}: model {self.model or 'provider default'} for {label}"
+                + (f"; effort {self.effort}" if self.effort else "")
             )
             self.progress(f"Backend {self.name!r}: waiting for {label} (timeout {self.timeout:g}s)")
             if self.cancellation and self.cancellation.previous_handler is not None:
@@ -249,6 +272,7 @@ class CommandAgent:
                         prompt=prompt,
                         schema=schema,
                         model=self.model,
+                        effort=self.effort,
                         env=self.environment(),
                         timeout=self.timeout,
                         cancel=cancel,

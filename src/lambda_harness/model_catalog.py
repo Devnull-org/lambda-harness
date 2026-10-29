@@ -117,7 +117,15 @@ def codex_models(client):
         if not cursor:
             return {
                 "models": [
-                    {"id": m["model"], "name": m.get("displayName", m["model"])} for m in models
+                    {
+                        "id": m["model"],
+                        "name": m.get("displayName", m["model"]),
+                        "efforts": [
+                            e["reasoningEffort"] for e in m.get("supportedReasoningEfforts", [])
+                        ],
+                        "default_effort": m.get("defaultReasoningEffort"),
+                    }
+                    for m in models
                 ],
                 "default": next((m["model"] for m in models if m.get("isDefault")), None),
             }
@@ -146,6 +154,7 @@ def claude_models(client):
                 "id": m["value"],
                 "name": m.get("displayName", m["value"]),
                 "resolved_model": m.get("resolvedModel"),
+                "efforts": m.get("supportedEffortLevels", []),
             }
             for m in models
         ],
@@ -211,10 +220,19 @@ def discover_models(agent, cwd, *, timeout=15):
         name = item.get("name") or item["id"]
         if not isinstance(name, str):
             raise ValueError("Provider returned an invalid model name")
+        efforts = item.get("efforts", [])
+        if not isinstance(efforts, list) or not all(valid_effort(e) for e in efforts):
+            raise ValueError("Provider returned invalid effort options")
+        if not (backend.effort_args or backend.approval_command or backend.input_format == "json"):
+            efforts = []
         models.append(
             {
                 "id": item["id"],
                 "name": name[:200],
+                "efforts": list(dict.fromkeys(efforts)),
+                "default_effort": item.get("default_effort")
+                if item.get("default_effort") in efforts
+                else None,
                 "resolved_model": item.get("resolved_model")
                 if valid_model(item.get("resolved_model"))
                 else None,
@@ -239,3 +257,7 @@ def discover_models(agent, cwd, *, timeout=15):
 
 def valid_model(value):
     return isinstance(value, str) and 0 < len(value) <= 256 and not any(ord(c) < 32 for c in value)
+
+
+def valid_effort(value):
+    return isinstance(value, str) and re.fullmatch(r"[a-z][a-z0-9_-]{0,31}", value) is not None

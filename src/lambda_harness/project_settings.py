@@ -29,6 +29,10 @@ class ProjectSettings:
             "(task_id TEXT PRIMARY KEY, backend TEXT NOT NULL, model TEXT)"
         )
 
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS task_efforts (task_id TEXT PRIMARY KEY, effort TEXT)"
+        )
+
     def __enter__(self):
         return self
 
@@ -47,10 +51,22 @@ class ProjectSettings:
         row = self.connection.execute(
             "SELECT backend, model FROM task_models WHERE task_id = ?", (task_id,)
         ).fetchone()
-        return {"backend": row[0], "model": row[1]} if row else None
+        if not row:
+            return None
+        effort = self.connection.execute(
+            "SELECT effort FROM task_efforts WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return {
+            "backend": row[0],
+            "model": row[1],
+            **({"effort": effort[0]} if effort and effort[0] else {}),
+        }
 
-    def save_task_model(self, task_id, backend, model):
+    def save_task_model(self, task_id, backend, model, effort=None):
         with self.connection:
             self.connection.execute(
                 "INSERT OR REPLACE INTO task_models VALUES (?, ?, ?)", (task_id, backend, model)
+            )
+            self.connection.execute(
+                "INSERT OR REPLACE INTO task_efforts VALUES (?, ?)", (task_id, effort)
             )

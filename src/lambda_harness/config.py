@@ -62,6 +62,7 @@ class RoutedAgent:
         *,
         backend=None,
         model=None,
+        effort=None,
         timeout=None,
         progress=None,
         activity=None,
@@ -73,6 +74,7 @@ class RoutedAgent:
         self.settings = settings
         self.backend = backend
         self.model = model
+        self.effort = effort
         self.timeout = timeout
         self.progress = progress
         self.activity = activity
@@ -97,6 +99,7 @@ class RoutedAgent:
             self.settings.backends[name],
             name=name,
             model=model,
+            effort=self.effort,
             timeout=self.timeout,
             progress=self.progress,
             activity=self.activity,
@@ -111,6 +114,7 @@ class RoutedAgent:
             "backend": agent.name,
             "model": agent.model,
             "reported_model": agent.reported_model,
+            **({"effort": agent.effort} if agent.effort is not None else {}),
         }
         return result
 

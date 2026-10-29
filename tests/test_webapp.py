@@ -1711,3 +1711,73 @@ def test_tasks_run_concurrently_with_isolated_models_worktrees_logs_and_stop(bro
     assert alpha["task"]["messages"][-1]["answer"] == "alpha completed"
     assert not alpha["project_running"]
     assert "alpha completed" not in json.dumps(call("/api/state?task=beta")[1]["task"]["messages"])
+
+
+def test_review_model_and_effort_reach_both_reviewers_and_survive_replies(browser_app, tmp_path):
+    from lambda_harness.backends import Backend
+
+    app, call, calls, _ = browser_app
+    script = executable(
+        tmp_path,
+        "import json,sys\nfrom pathlib import Path\n"
+        "if '--models' in sys.argv:\n"
+        " print(json.dumps({'models':[{'id':'chosen-model','efforts':['low','high']}]}))\n"
+        " sys.exit(0)\n"
+        "r=json.load(sys.stdin)\n"
+        f"with Path({str(calls)!r}).open('a') as f: f.write(json.dumps(r)+'\\n')\n"
+        "print(json.dumps({'answer':'Explanation'} if r['context'].get('intent')=='explain' "
+        "else {'summary':'Reviewed','findings':[]}))\n",
+    )
+    app.settings.backends["test"] = Backend(
+        command=[script], input_format="json", models_command=["{executable}", "--models"]
+    )
+    git(app.args.repo, "checkout", "-b", "feature")
+    (app.args.repo / SOURCE).write_text(IMPLEMENTED)
+    git(app.args.repo, "commit", "-am", "Change")
+    assert (
+        call(
+            "/api/command",
+            {
+                "command": "review",
+                "task_id": "effort-review",
+                "request": "Review",
+                "base": "main",
+                "head": "feature",
+                "backend": "test",
+                "model": "chosen-model",
+                "effort": "high",
+                "reviewers": "both",
+            },
+        )[0]
+        == 202
+    )
+    wait_for(lambda: app.job and not app.job["running"])
+    assert app.job["error"] is None, app.job
+    view = call("/api/state?task=effort-review")[1]["task"]
+    assert view["model_selection"] == {"backend": "test", "model": "chosen-model", "effort": "high"}
+    assert set(view["messages"][-1]["generations"]) == {"haskell_reviewer", "security_reviewer"}
+    assert all(g["effort"] == "high" for g in view["messages"][-1]["generations"].values())
+    app.args.model = "different-default"
+    for effort in ("saved", None, "low"):
+        command = {
+            "command": "respond",
+            "task_id": "effort-review",
+            "action": "question",
+            "text": "Explain",
+        }
+        if effort != "saved":
+            command["effort"] = effort
+        assert call("/api/command", command)[0] == 202
+        wait_for(lambda: not app.job["running"])
+        assert app.job["error"] is None, app.job
+    requests = [json.loads(line) for line in calls.read_text().splitlines()]
+    assert [r["model"] for r in requests] == ["chosen-model"] * 8
+    assert [r.get("effort") for r in requests] == ["high"] * 4 + [None] * 2 + ["low"] * 2
+    assert [r["role"] for r in requests] == ["haskell_reviewer", "security_reviewer"] * 4
+    # Reject an unsupported setting before invoking either reviewer or changing preferences.
+    count = len(requests)
+    assert call("/api/command", {**command, "effort": "ultra"})[0] == 202
+    wait_for(lambda: not app.job["running"])
+    assert "not supported" in app.job["error"]
+    assert len(calls.read_text().splitlines()) == count
+    assert call("/api/state?task=effort-review")[1]["task"]["model_selection"]["effort"] == "low"

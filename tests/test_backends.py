@@ -291,3 +291,33 @@ def test_invalid_backend_output_is_saved_with_the_task(rig, tmp_path):
     assert (directory / "stdout.txt").read_text() == "invalid response\n"
     assert (directory / "stderr.txt").read_text() == "diagnostic\n"
     assert view["prompt"]["diagnostics"] == str(directory)
+
+
+@pytest.mark.parametrize("native", [False, True])
+def test_effort_is_forwarded_alongside_exact_model_without_shell_evaluation(tmp_path, native):
+    capture = tmp_path / "effort.json"
+    script = executable(
+        tmp_path,
+        "import json,sys\nfrom pathlib import Path\n"
+        f"Path({str(capture)!r}).write_text(json.dumps(sys.argv[1:]))\n"
+        f"print({json.dumps(REPLY)!r})\n",
+    )
+    args = ["-c", "{effort_config}"] if native else ["--effort", "{effort}"]
+    agent = CommandAgent(
+        Backend(command=[script], model_args=["--model", "{model}"], effort_args=args),
+        model="chosen-model",
+        effort="high",
+    )
+    assert agent("interviewer", {}, tmp_path) == REPLY
+    assert json.loads(capture.read_text()) == [
+        "--model",
+        "chosen-model",
+        *(["-c", 'model_reasoning_effort="high"'] if native else ["--effort", "high"]),
+    ]
+
+
+def test_unsupported_effort_is_never_silently_ignored(tmp_path):
+    with pytest.raises(ValueError, match="does not support effort"):
+        CommandAgent(Backend(command=["never-executed"]), effort="high")(
+            "interviewer", {}, tmp_path
+        )

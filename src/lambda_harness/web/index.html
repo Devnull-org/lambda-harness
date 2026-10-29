@@ -578,11 +578,22 @@
             <label for="new-chat-model">Model for this reply</label>
             <div class="model-controls">
               <select id="new-chat-model"></select>
+              <label class="effort-control" for="new-effort"
+                >Effort
+                <select
+                  id="new-effort"
+                  aria-describedby="new-effort-help"
+                ></select>
+              </label>
               <button id="new-refresh-models" type="button" class="quiet">
                 Refresh models
               </button>
             </div>
             <small id="new-model-status" class="muted" role="status"></small>
+            <small id="new-effort-help" class="muted"
+              >Higher effort allows deeper reasoning and can take longer.
+              Applies to this task's next response or phase.</small
+            >
           </div>
           <div class="form-footer">
             <span class="muted">Each task gets its own worktree.</span
@@ -673,11 +684,22 @@
           <label for="reply-chat-model">Model for the next response</label>
           <div class="model-controls">
             <select id="reply-chat-model"></select>
+            <label class="effort-control" for="reply-effort"
+              >Effort
+              <select
+                id="reply-effort"
+                aria-describedby="reply-effort-help"
+              ></select>
+            </label>
             <button id="reply-refresh-models" type="button" class="quiet">
               Refresh models
             </button>
           </div>
           <small id="reply-model-status" class="muted" role="status"></small>
+          <small id="reply-effort-help" class="muted"
+            >Higher effort allows deeper reasoning and can take longer. Applies
+            to this task's next response or phase.</small
+          >
         </div>
         <section id="composer" hidden>
           <div class="compose-top">

@@ -136,3 +136,6 @@ reloads and saved per task when a request starts. Explicit choices override role
 and provider defaults. Replies show the requested model and, when the provider
 reports it, the actual model ID. An unavailable selection fails visibly instead
 of silently switching to another model.
+Use **Effort** beside the model picker to choose a level advertised by that model.
+The selection is saved per task and model; **Provider default** clears the override.
+Higher effort can take longer. Review receipts show each reviewer's requested and reported model and selected effort.

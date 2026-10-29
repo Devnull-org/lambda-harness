@@ -26,7 +26,7 @@ from .config import RoutedAgent, load_settings
 from .conversation import conversation_messages
 from .discovery import SelectionCancelled, SelectionRequired, select_backend
 from .handoff import MAX_HANDOFF_BYTES, export_handoff, import_handoff, preview_handoff
-from .model_catalog import discover_models, valid_model
+from .model_catalog import discover_models, valid_effort, valid_model
 from .phone import PhoneAccess, request_origin
 from .project_context import ContextStore, state_directory
 from .project_settings import ProjectSettings, project_identity
@@ -449,7 +449,7 @@ class LocalApp:
                 state_directory(self.args.repo, self.args.state_dir)
             ) as preferences:
                 if saved := preferences.task_model(command["task_id"]):
-                    command.update(saved)
+                    command = {**saved, **command}
         for field in (
             "request",
             "base",
@@ -460,6 +460,7 @@ class LocalApp:
             "confirmation",
             "backend",
             "model",
+            "effort",
             "head",
             "reviewers",
             "expectation",
@@ -490,6 +491,11 @@ class LocalApp:
                 raise ValueError("Choose a valid model identifier")
             if (backend or self.settings.default_backend) == "auto":
                 raise ValueError("Choose a model from a specific backend")
+        if command.get("effort") is not None:
+            if not valid_effort(command["effort"]):
+                raise ValueError("Choose a valid reasoning effort")
+            if not command.get("model") or (backend or self.settings.default_backend) == "auto":
+                raise ValueError("Choose a specific backend and model before selecting effort")
         with self.lock:
             if self.shutdown.is_set():
                 raise ValueError("This project was closed; reopen it before starting work")
@@ -531,6 +537,7 @@ class LocalApp:
                 self.settings,
                 backend=backend,
                 model=command.get("model", self.args.model),
+                effort=command.get("effort"),
                 timeout=self.args.agent_timeout,
                 progress=progress,
                 cancellation=cancellation,
@@ -555,12 +562,25 @@ class LocalApp:
                 in {"save_agent", "continue_handoff", "run_checks", "return_to_task"}
             ):
                 selected = select_backend(agent, self.args.repo)
+                if command.get("effort") is not None:
+                    catalog = discover_models(agent.resolve("chat"), self.args.repo)
+                    model = next(
+                        (m for m in catalog["models"] if m["id"] == command["model"]), None
+                    )
+                    if model is None or command["effort"] not in model.get("efforts", []):
+                        raise ValueError(
+                            "Selected effort is not supported by this model. "
+                            "Refresh models and choose an available effort."
+                        )
                 progress(f"Selected backend: {selected}")
                 with ProjectSettings(
                     state_directory(self.args.repo, self.args.state_dir)
                 ) as preferences:
                     preferences.save_task_model(
-                        task_id, selected, command.get("model", self.args.model)
+                        task_id,
+                        selected,
+                        command.get("model", self.args.model),
+                        command.get("effort"),
                     )
             if self.shutdown.is_set():
                 raise SelectionCancelled

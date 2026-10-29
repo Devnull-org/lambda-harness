@@ -16,7 +16,9 @@ APPROVALS = {
 }
 
 
-def run_session(argv, cwd, *, prompt, schema, model, env, timeout, cancel, approve, progress=None):
+def run_session(
+    argv, cwd, *, prompt, schema, model, env, timeout, cancel, approve, progress=None, effort=None
+):
     """Return the final structured reply and provider model; never auto-grant permissions."""
     if cancel is not None and cancel.is_set():
         raise ProcessError("Model request stopped", kind="cancelled")
@@ -175,6 +177,13 @@ def run_session(argv, cwd, *, prompt, schema, model, env, timeout, cancel, appro
                         elif event["id"] == "thread":
                             thread_id = result["thread"]["id"]
                             reported_model = result.get("model")
+                            if model and reported_model and reported_model != model:
+                                raise ProcessError(
+                                    f"Requested model {model!r}, "
+                                    f"but provider selected {reported_model!r}. "
+                                    "Stopped before generation; select an available model.",
+                                    kind="provider",
+                                )
                             request(
                                 "turn",
                                 "turn/start",
@@ -182,6 +191,8 @@ def run_session(argv, cwd, *, prompt, schema, model, env, timeout, cancel, appro
                                     "threadId": thread_id,
                                     "input": [{"type": "text", "text": prompt}],
                                     "outputSchema": schema,
+                                    **({"model": model} if model is not None else {}),
+                                    **({"effort": effort} if effort is not None else {}),
                                 },
                             )
                         elif event["id"] == "turn":
@@ -196,6 +207,13 @@ def run_session(argv, cwd, *, prompt, schema, model, env, timeout, cancel, appro
                             progress("Codex: " + last_error + suffix)
                     if method == "model/rerouted":
                         reported_model = params.get("toModel") or reported_model
+                        if model and reported_model != model:
+                            raise ProcessError(
+                                f"Provider switched from requested model {model!r} "
+                                f"to {reported_model!r}; "
+                                "response rejected. Choose a model explicitly before retrying.",
+                                kind="provider",
+                            )
                     if method == "item/completed":
                         item = params.get("item", {})
                         if item.get("type") == "agentMessage" and item.get("phase") != "commentary":

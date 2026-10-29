@@ -12,6 +12,7 @@ probe = ["{executable}", "status"]
 probe_reject_patterns = ["not logged in"]
 
 [backends.codex]
+effort_args = ["-c", "{effort_config}"]
 approval_command = ["{executable}", "app-server", "--listen", "stdio://"]
 models_command = ["{executable}", "app-server"]
 models_format = "codex"
@@ -22,6 +23,7 @@ probe = ["{executable}", "login", "status"]
 probe_reject_patterns = ["not logged in"]
 
 [backends.claude-code]
+effort_args = ["--effort", "{effort}"]
 models_command = ["{executable}", "--print", "--input-format", "stream-json", "--output-format", "stream-json", "--verbose", "--tools", "", "--strict-mcp-config", "--mcp-config", '{"mcpServers":{}}', "--disable-slash-commands", "--no-session-persistence", "--settings", '{"disableAllHooks":true}']
 models_format = "claude"
 command = ["claude", "--print", "--output-format", "json", "--permission-mode", "plan", "--tools", "Read,Glob,Grep", "--strict-mcp-config", "--disable-slash-commands", "--no-session-persistence", "--json-schema", "{schema}"]

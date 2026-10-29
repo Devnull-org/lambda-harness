@@ -4075,3 +4075,164 @@ test("reviewer answers with different code indentation are not deduplicated", as
   );
   assert.equal(descendants(content, "pre").length, 2);
 });
+
+for (const kind of ["explore", "review"]) {
+  test(`selected model and effort reach new ${kind} tasks and later phases`, async () => {
+    const current = { ...snapshot(), task: null };
+    const posts = [];
+    const ui = await app({
+      fetcher: async (path, options) => {
+        if (path.startsWith("/api/models"))
+          return response({
+            catalogs: [
+              {
+                backend: "test",
+                models: [
+                  {
+                    id: "careful",
+                    name: "Careful",
+                    efforts: ["low", "high", "max"],
+                  },
+                ],
+              },
+            ],
+          });
+        if (path === "/api/command") {
+          const body = JSON.parse(options.body);
+          posts.push(body);
+          current.task = {
+            ...task(body.task_id),
+            model_selection: {
+              backend: body.backend,
+              model: body.model,
+              effort: body.effort,
+            },
+          };
+          return response({});
+        }
+        return response(current);
+      },
+    });
+    await ui.elements.get("new-task").onclick();
+    ui.kind.value = kind;
+    ui.elements.get("new-form").onchange();
+    const model = ui.elements.get("new-chat-model"),
+      effort = ui.elements.get("new-effort");
+    model.value = JSON.stringify({ backend: "test", model: "careful" });
+    model.onchange();
+    assert.equal(effort.disabled, false);
+    assert.deepEqual(
+      effort.children.map((n) => n.value),
+      ["", "low", "high", "max"],
+    );
+    effort.value = "max";
+    effort.onchange();
+    ui.elements.get("task-name").value = "effort-task";
+    ui.elements.get("request").value = "Investigate";
+    ui.elements.get("new-form").onsubmit({ preventDefault() {} });
+    await settle();
+    assert.equal(posts[0].model, "careful");
+    assert.equal(posts[0].effort, "max");
+    assert.equal(ui.elements.get("reply-effort").value, "max");
+    await ui.run('command({command:"run",task_id:selected,phase:"review"})');
+    assert.equal(posts[1].model, "careful");
+    assert.equal(posts[1].effort, "max");
+  });
+}
+
+test("effort is scoped by task and model, persists across polling, and can be cleared", async () => {
+  let current = snapshot({
+    ...task(),
+    model_selection: { backend: "test", model: "careful", effort: "high" },
+  });
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path.startsWith("/api/models"))
+        return response({
+          catalogs: [
+            {
+              backend: "test",
+              models: [
+                { id: "careful", name: "Careful", efforts: ["low", "high"] },
+                { id: "quick", name: "Quick", efforts: ["low"] },
+              ],
+            },
+          ],
+        });
+      if (path === "/api/command") {
+        posted = JSON.parse(options.body);
+        return response({});
+      }
+      return response(current);
+    },
+  });
+  const model = ui.elements.get("reply-chat-model"),
+    effort = ui.elements.get("reply-effort");
+  assert.equal(effort.value, "high");
+  model.value = JSON.stringify({ backend: "test", model: "quick" });
+  model.onchange();
+  assert.equal(effort.value, "");
+  assert.deepEqual(
+    effort.children.map((n) => n.value),
+    ["", "low"],
+  );
+  effort.value = "low";
+  effort.onchange();
+  await ui.run("refresh()");
+  assert.equal(effort.value, "low");
+  current = snapshot(task("other"));
+  await ui.run('selectTask("other"); refresh()');
+  model.value = JSON.stringify({ backend: "test", model: "careful" });
+  model.onchange();
+  assert.equal(effort.value, "");
+  current = snapshot(task());
+  await ui.run('selectTask("example"); refresh()');
+  assert.equal(effort.value, "low");
+  effort.value = "";
+  effort.onchange();
+  await ui.run(
+    'command({command:"respond",task_id:selected,action:"question",text:"Explain"})',
+  );
+  assert.equal(posted.model, "quick");
+  assert.equal(posted.effort, null);
+});
+
+test("effort survives browser reload and unavailable saved effort is never silently downgraded", async () => {
+  const saved = new Map();
+  const storage = {
+    getItem: (key) => saved.get(key),
+    setItem: (key, value) => saved.set(key, value),
+  };
+  let levels = ["low", "high"];
+  const fetcher = async (path) =>
+    response(
+      path.startsWith("/api/models")
+        ? {
+            catalogs: [
+              {
+                backend: "test",
+                models: [{ id: "careful", name: "Careful", efforts: levels }],
+              },
+            ],
+          }
+        : snapshot(),
+    );
+  const first = await app({ storage, fetcher });
+  first.elements.get("reply-chat-model").value = JSON.stringify({
+    backend: "test",
+    model: "careful",
+  });
+  first.elements.get("reply-chat-model").onchange();
+  first.elements.get("reply-effort").value = "high";
+  first.elements.get("reply-effort").onchange();
+  levels = ["low"];
+  const second = await app({ storage, fetcher });
+  const effort = second.elements.get("reply-effort");
+  assert.equal(effort.value, "high");
+  assert.match(effort.textContent, /not currently available/);
+  assert.equal(second.run("responseModelChoice().effort"), "high");
+  effort.value = "";
+  effort.onchange();
+  assert.equal(second.run("responseModelChoice().effort"), null);
+});

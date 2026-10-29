@@ -108,3 +108,28 @@ def test_backend_without_catalog_keeps_its_configured_model(tmp_path):
     assert result["current"] == "custom-model"
     assert result["models"] == []
     assert result["notice"]
+
+
+def test_codex_catalog_preserves_model_specific_effort_levels(tmp_path):
+    agent = candidate(
+        tmp_path,
+        """
+import json,sys
+for line in sys.stdin:
+    r=json.loads(line)
+    if r['method']=='initialize':
+        print(json.dumps({'id':r['id'],'result':{}}),flush=True)
+    elif r['method']=='model/list':
+        print(json.dumps({'id':r['id'],'result':{'data':[
+            {'model':'quick','isDefault':True,'defaultReasoningEffort':'low',
+             'supportedReasoningEfforts':[{'reasoningEffort':'low'},{'reasoningEffort':'high'}]},
+            {'model':'deep','defaultReasoningEffort':'max',
+             'supportedReasoningEfforts':[{'reasoningEffort':'max'}]}]}}),flush=True)
+""",
+        "codex",
+    )
+    agent.backend.effort_args = ["-c", "{effort_config}"]
+    models = discover_models(agent, tmp_path)["models"]
+    assert models[0]["efforts"] == ["low", "high"]
+    assert models[0]["default_effort"] == "low"
+    assert models[1]["efforts"] == ["max"]

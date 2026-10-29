@@ -181,3 +181,82 @@ def test_failed_turn_reports_provider_diagnostic(tmp_path):
             approve=lambda request, cancel: False,
         )
     assert failure.value.kind == "provider"
+
+
+@pytest.mark.parametrize("effort", [None, "high", "max"])
+def test_native_turn_receives_the_exact_selected_model_and_effort(tmp_path, effort):
+    from pathlib import Path
+
+    script = session_script(tmp_path)
+    path = Path(script)
+    path.write_text(
+        path.read_text().replace(
+            "assert r['params']['outputSchema']['type']=='object'",
+            "assert r['params']['model']=='chosen-model'\n"
+            f"        assert r['params'].get('effort')=={effort!r}\n"
+            "        assert r['params']['outputSchema']['type']=='object'",
+        )
+    )
+    answer, model = run_session(
+        [script],
+        tmp_path,
+        prompt="Review",
+        schema={"type": "object"},
+        model="chosen-model",
+        effort=effort,
+        env=os.environ.copy(),
+        timeout=5,
+        cancel=None,
+        approve=lambda *_: False,
+    )
+    assert model == "chosen-model"
+    assert json.loads(answer)["answer"] == "denied"
+
+
+def test_native_provider_cannot_silently_replace_selected_model(tmp_path):
+    from pathlib import Path
+
+    script = session_script(tmp_path)
+    path = Path(script)
+    path.write_text(path.read_text().replace("p.get('model','default-model')", "'different-model'"))
+    with pytest.raises(ProcessError, match="Requested model.*chosen-model.*different-model"):
+        run_session(
+            [script],
+            tmp_path,
+            prompt="Review",
+            schema={"type": "object"},
+            model="chosen-model",
+            effort="high",
+            env=os.environ.copy(),
+            timeout=5,
+            cancel=None,
+            approve=lambda *_: False,
+        )
+
+
+def test_native_mid_turn_model_reroute_is_rejected(tmp_path):
+    from pathlib import Path
+
+    script = session_script(tmp_path)
+    path = Path(script)
+    path.write_text(
+        path.read_text().replace(
+            "send({'id':42,'method':METHOD".replace(
+                "METHOD", repr("item/commandExecution/requestApproval")
+            ),
+            "send({'method':'model/rerouted','params':{'threadId':'thread','toModel':'other'}})\n"
+            "        send({'id':42,'method':" + repr("item/commandExecution/requestApproval"),
+        )
+    )
+    with pytest.raises(ProcessError, match="switched from requested model.*chosen-model.*other"):
+        run_session(
+            [script],
+            tmp_path,
+            prompt="Review",
+            schema={"type": "object"},
+            model="chosen-model",
+            env=os.environ.copy(),
+            timeout=5,
+            cancel=None,
+            approve=lambda *_: False,
+        )

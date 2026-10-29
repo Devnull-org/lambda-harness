@@ -1721,3 +1721,16 @@ aside .local-dot {
   font: inherit;
   white-space: inherit;
 }
+
+.model-controls .effort-control {
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+  align-items: center;
+  gap: 8px;
+  margin: 0;
+}
+.model-controls .effort-control select {
+  flex: 1 1 130px;
+  width: auto;
+}

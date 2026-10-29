@@ -157,6 +157,34 @@ function rememberModel(scope, value) {
     /* The server saves choices with each request too. */
   }
 }
+const effortChoices = new Map();
+try {
+  for (const [key, value] of JSON.parse(
+    globalThis.localStorage?.getItem("lambda-harness-effort-choices") || "[]",
+  ))
+    if (typeof key === "string" && typeof value === "string")
+      effortChoices.set(key, value);
+} catch {
+  /* Saved task settings remain available. */
+}
+function effortScope(choice, task = selected) {
+  return JSON.stringify([
+    modelScope(task, choice.backend),
+    choice.backend,
+    choice.model,
+  ]);
+}
+function rememberEffort(key, effort) {
+  effortChoices.set(key, effort);
+  try {
+    globalThis.localStorage?.setItem(
+      "lambda-harness-effort-choices",
+      JSON.stringify([...effortChoices]),
+    );
+  } catch {
+    /* The server also saves the submitted setting. */
+  }
+}
 const executionChoices = new Map();
 function executionKey(task) {
   return JSON.stringify([activeProject?.id || state?.repository, task.task_id]);
@@ -757,10 +785,77 @@ function modelScope(task = selected, backend = state?.backend || "auto") {
 function responseModelChoice() {
   const prefix = selected ? "reply" : "new";
   if ($(`${prefix}-model-picker`).hidden) return {};
-  return JSON.parse(
+  const choice = JSON.parse(
     $(`${prefix}-chat-model`).value ||
       JSON.stringify({ backend: state?.backend || "auto", model: null }),
   );
+  const effort = $(`${prefix}-effort`).value;
+  if (effort || effortChoices.has(effortScope(choice)))
+    choice.effort = effort || null;
+  return choice;
+}
+function renderEffortPicker(prefix, catalogs) {
+  const picker = $(`${prefix}-effort`);
+  const choice = JSON.parse($(`${prefix}-chat-model`).value || "{}");
+  const model = catalogs
+    .find((c) => c.backend === choice.backend)
+    ?.models?.find((m) => m.id === choice.model);
+  const efforts = model?.efforts || [];
+  const key = effortScope(choice);
+  const saved =
+    selected && state.task?.task_id === selected
+      ? state.task.model_selection
+      : null;
+  let chosen = effortChoices.get(key);
+  if (
+    chosen === undefined &&
+    saved?.backend === choice.backend &&
+    saved?.model === choice.model &&
+    saved?.effort
+  ) {
+    chosen = saved.effort;
+    effortChoices.set(key, chosen);
+  }
+  const options = [
+    {
+      value: "",
+      label: "Provider default",
+    },
+  ];
+  for (const value of efforts)
+    options.push({
+      value,
+      label:
+        { xhigh: "Extra high", max: "Maximum" }[value] ||
+        value[0].toUpperCase() + value.slice(1),
+    });
+  if (chosen && !efforts.includes(chosen))
+    options.push({
+      value: chosen,
+      label: chosen + " (not currently available)",
+    });
+  const optionKey = JSON.stringify(options);
+  if (picker.dataset.options !== optionKey) {
+    picker.replaceChildren();
+    for (const item of options) {
+      const option = el("option", item.label);
+      option.value = item.value;
+      picker.append(option);
+    }
+    picker.dataset.options = optionKey;
+  }
+  picker.value = chosen || "";
+  picker.disabled =
+    submitting || !!currentJob()?.running || (!efforts.length && !chosen);
+  $(`${prefix}-effort-help`).textContent = efforts.length
+    ? "Higher effort allows deeper reasoning and can take longer. Applies to this task's next response or phase."
+    : chosen
+      ? "Saved effort is not in the current catalog. Refresh models or choose Provider default."
+      : !choice.model
+        ? "Choose a model to see its supported effort levels."
+        : modelLoadingKey === modelKey()
+          ? "Checking available effort levels…"
+          : "This model or provider does not advertise configurable effort. Provider default will be used.";
 }
 async function loadModels(force = false) {
   const key = modelKey(),
@@ -805,7 +900,10 @@ function renderModelPicker() {
     : null;
   let chosen = modelChoices.get(scope);
   if (chosen === undefined && conversation && state.task.model_selection)
-    chosen = JSON.stringify(state.task.model_selection);
+    chosen = JSON.stringify({
+      backend: state.task.model_selection.backend,
+      model: state.task.model_selection.model,
+    });
   if (
     chosen === undefined &&
     last &&
@@ -848,6 +946,7 @@ function renderModelPicker() {
   }
   picker.value = chosen || "";
   picker.disabled = submitting || !!currentJob()?.running;
+  renderEffortPicker(prefix, catalogs);
   $(`${prefix}-refresh-models`).disabled = modelLoadingKey === key;
   const problems = catalogs
     .filter((c) => c.error || c.notice)
@@ -858,13 +957,18 @@ function renderModelPicker() {
       : data?.error ||
         problems.join(" ") ||
         (last
-          ? `Last reply: ${last.backend} · ${last.reported_model || last.model || "provider default"}`
+          ? `Last reply: ${last.backend} · ${last.reported_model || last.model || "provider default"}${last.effort ? ` · Effort: ${last.effort}` : ""}`
           : `Backend: ${data?.backend || state.backend}. Choose a model for this response.`);
   if (modelCatalogKey !== key && modelLoadingKey !== key) void loadModels();
 }
 for (const prefix of ["new", "reply"]) {
   $(`${prefix}-chat-model`).onchange = () => {
     rememberModel(modelScope(), $(`${prefix}-chat-model`).value);
+    renderModelPicker();
+  };
+  $(`${prefix}-effort`).onchange = () => {
+    const choice = JSON.parse($(`${prefix}-chat-model`).value || "{}");
+    rememberEffort(effortScope(choice), $(`${prefix}-effort`).value);
   };
   $(`${prefix}-refresh-models`).onclick = () => loadModels(true);
 }
@@ -974,6 +1078,8 @@ async function command(body) {
         modelScope(body.task_id, body.backend),
         JSON.stringify({ backend: body.backend, model: body.model }),
       );
+    if (body.backend && Object.hasOwn(body, "effort"))
+      rememberEffort(effortScope(body, body.task_id), body.effort || "");
     if (
       [
         "start",
@@ -1523,7 +1629,7 @@ function renderHistory(task) {
       const generation = item.generation;
       const entry = message(
         generation
-          ? `Assistant · ${generation.backend} · ${generation.reported_model || generation.model || "provider default"}`
+          ? `Assistant · ${generation.backend} · ${generation.reported_model || generation.model || "provider default"}${generation.effort ? ` · Effort: ${generation.effort}` : ""}`
           : item.role === "chat"
             ? "Assistant"
             : item.role.replaceAll("_", " "),
@@ -1555,6 +1661,16 @@ function renderHistory(task) {
       }
       history.append(entry);
     }
+    if (item.generations) {
+      for (const [role, generation] of Object.entries(item.generations))
+        history.lastElementChild?.append(
+          el(
+            "small",
+            `${reviewerName(role)} · ${generation.backend} · Requested: ${generation.model || "provider default"} · Reported: ${generation.reported_model || "not provided"}${generation.effort ? ` · Effort: ${generation.effort}` : ""}`,
+            "generation-receipt muted",
+          ),
+        );
+    }
     if (item.generation && (item.role !== "chat" || item.task_chat_message)) {
       const generation = item.generation;
       const requested = generation.model || "provider default";
@@ -1562,7 +1678,7 @@ function renderHistory(task) {
       history.children[history.children.length - 1]?.append(
         el(
           "small",
-          `${generation.backend} · Requested: ${requested}${reported ? ` · Reported: ${reported}` : " · Provider did not report a model ID"}`,
+          `${generation.backend} · Requested: ${requested}${reported ? ` · Reported: ${reported}` : " · Provider did not report a model ID"}${generation.effort ? ` · Effort: ${generation.effort}` : ""}`,
           "generation-receipt muted",
         ),
       );
