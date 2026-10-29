@@ -2792,6 +2792,23 @@ $("refresh").onclick = () => guard(refresh);
 $("task-checks").onclick = () =>
   guard(() => command({ command: "task_checks", task_id: selected }));
 $("latest-message").onclick = scrollToLatestMessage;
+function updateBackToTop() {
+  $("back-to-top").hidden = (globalThis.scrollY || 0) < 400;
+}
+$("back-to-top").onclick = () => {
+  // Move keyboard focus to the menu before hiding the floating control.
+  $("projects-link").focus({ preventScroll: true });
+  globalThis.scrollTo({
+    top: 0,
+    behavior: globalThis.matchMedia?.("(prefers-reduced-motion: reduce)")
+      .matches
+      ? "instant"
+      : "smooth",
+  });
+};
+globalThis.addEventListener("scroll", updateBackToTop, { passive: true });
+globalThis.addEventListener("pageshow", updateBackToTop);
+updateBackToTop();
 $("send").onclick = () => guard(() => respond($("message-action").value));
 function recallLastMessage() {
   const field = $("message"),

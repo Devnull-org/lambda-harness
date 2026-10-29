@@ -1734,3 +1734,22 @@ aside .local-dot {
   flex: 1 1 130px;
   width: auto;
 }
+
+/* Leave room at the page end so the floating shortcut cannot cover controls. */
+main {
+  padding-bottom: calc(84px + env(safe-area-inset-bottom, 0px));
+}
+.back-to-top {
+  position: fixed;
+  right: calc(18px + env(safe-area-inset-right, 0px));
+  bottom: calc(18px + env(safe-area-inset-bottom, 0px));
+  z-index: 10;
+  min-height: 44px;
+  padding: 10px 16px;
+  border-radius: 999px;
+  box-shadow: 0 4px 16px var(--shadow);
+}
+.back-to-top span {
+  margin-right: 4px;
+  font-size: 18px;
+}

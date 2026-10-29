@@ -55,7 +55,9 @@ class Element {
   close() {
     this.open = false;
   }
-  focus() {}
+  focus(options) {
+    this.focusOptions = options;
+  }
   select() {
     this.selected = true;
   }
@@ -674,6 +676,7 @@ async function app({
   pathname = "/",
   fetcher: initialFetch,
   mobile = false,
+  reducedMotion = false,
   clipboard,
   audio,
   storage,
@@ -687,6 +690,7 @@ async function app({
   const location = { pathname };
   const navigation = [];
   const pageLoads = [];
+  const pageScrolls = [];
   location.assign = (path) => pageLoads.push(path);
   const listeners = {};
   const downloads = [];
@@ -718,7 +722,12 @@ async function app({
     innerHeight: 800,
     AudioContext: audio,
     localStorage: storage,
-    matchMedia: () => ({ matches: mobile }),
+    matchMedia: (query) => ({
+      matches:
+        query === "(prefers-reduced-motion: reduce)" ? reducedMotion : mobile,
+    }),
+    scrollY: 0,
+    scrollTo: (options) => pageScrolls.push(options),
     navigator: { clipboard },
     location,
     history: {
@@ -779,6 +788,11 @@ async function app({
     location,
     navigation,
     pageLoads,
+    pageScrolls,
+    scrollPage: (top) => {
+      context.scrollY = top;
+      listeners.scroll?.();
+    },
     beforeUnload: () => {
       let blocked = false;
       listeners.beforeunload?.({
@@ -4236,3 +4250,31 @@ test("effort survives browser reload and unavailable saved effort is never silen
   effort.onchange();
   assert.equal(second.run("responseModelChoice().effort"), null);
 });
+
+for (const reducedMotion of [false, true]) {
+  test(`Back to top appears on long pages and returns to the menu (reduced motion: ${reducedMotion})`, async () => {
+    const ui = await app({ reducedMotion });
+    const button = ui.elements.get("back-to-top");
+    assert.equal(button.hidden, true);
+    ui.scrollPage(300);
+    assert.equal(button.hidden, true);
+    ui.scrollPage(1800);
+    assert.equal(button.hidden, false);
+    ui.elements.get("message").value = "Keep this draft";
+    button.onclick();
+    assert.equal(ui.pageScrolls.length, 1);
+    assert.equal(ui.pageScrolls[0].top, 0);
+    assert.equal(
+      ui.pageScrolls[0].behavior,
+      reducedMotion ? "instant" : "smooth",
+    );
+    assert.equal(
+      ui.elements.get("projects-link").focusOptions.preventScroll,
+      true,
+    );
+    assert.equal(ui.elements.get("message").value, "Keep this draft");
+    assert.equal(ui.run("selected"), "example");
+    ui.scrollPage(0);
+    assert.equal(button.hidden, true);
+  });
+}
