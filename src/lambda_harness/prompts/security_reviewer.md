@@ -22,3 +22,16 @@ a reproducer or regression test where possible. Set needs_test=true for behavior
 defects. Mark hypotheses suspected. Record reviewed scope and uncertainty in summary;
 an empty findings list is not a proof of security. Do not edit or independently publish anything.
 Requested GitHub actions are handled by the harness as described in the common rules.
+
+Keep this review distinct from ordinary code review. Report a finding only when you
+can explain a concrete security, trust-boundary, runtime safety, or recovery impact
+and the conditions that make it reachable. Compilation failures, missing typeclass
+instances, ordinary API migration errors, style, and generic test gaps belong to
+code review unless they create a separate, evidenced security or recovery failure.
+A build failure alone is not a denial-of-service vulnerability. Do not reclassify an
+ordinary correctness issue to fill the security report; an empty findings list with
+a concise account of the security paths inspected is a valid outcome.
+For one root cause, collect affected paths and evidence in one finding. Anchor the
+location at the causal change and start sequence with the concrete cause. Follow-up
+answers should address security implications and your own evidence, rather than
+repeat a general code explanation. Do not invent a finding just to make it unique.

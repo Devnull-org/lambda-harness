@@ -586,58 +586,157 @@ function githubCommentLink(url) {
   }
   return link;
 }
-function renderReviews(parent, reviews) {
+function reviewerName(role) {
+  return (
+    {
+      haskell_reviewer: "Code review",
+      security_reviewer: "Security review",
+      documentation_reviewer: "Documentation review",
+    }[role] || role.replaceAll("_", " ")
+  );
+}
+function reviewText(text) {
+  return String(text || "")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+function findingContent(finding) {
+  // IDs belong to reviewers; compare the actual report instead.
+  return JSON.stringify(
+    Object.entries(finding)
+      .filter(([key]) => key !== "id")
+      .sort(([a], [b]) => a.localeCompare(b)),
+  );
+}
+function groupedReviewFindings(reviews) {
+  const groups = [];
   for (const [role, review] of Object.entries(reviews)) {
-    parent.append(
-      el(
-        "h3",
-        {
-          haskell_reviewer: "Code review",
-          security_reviewer: "Security review",
-          documentation_reviewer: "Documentation review",
-        }[role] || role.replaceAll("_", " "),
-      ),
-      prose(review.summary),
-    );
     for (const finding of review.findings) {
-      const card = el("article", undefined, "review-finding");
-      card.append(
-        el("strong", `${finding.severity.toUpperCase()} · ${finding.title}`),
-        el("p", finding.location, "muted"),
-        prose(finding.impact),
+      const root = reviewText(finding.sequence?.[0]);
+      const group = groups.find(
+        (items) =>
+          !items.some((item) => item.role === role) &&
+          items.some(
+            ({ finding: previous }) =>
+              findingContent(previous) === findingContent(finding) ||
+              (root &&
+                reviewText(finding.location) &&
+                reviewText(previous.location) ===
+                  reviewText(finding.location) &&
+                reviewText(previous.sequence?.[0]) === root),
+          ),
       );
-      const details = el("details");
-      details.append(el("summary", "Evidence and recommendation"));
-      section(details, "Conditions", finding.conditions);
-      section(details, "Sequence", finding.sequence.join(" → "));
-      section(details, "Evidence", finding.evidence);
-      section(details, "Recommendation", finding.recommendation);
-      details.append(el("small", `${finding.id} · ${finding.confidence}`));
-      card.append(details);
-      const tools = state?.task?.review_actions;
-      const current = state?.task?.prompt?.reviews?.[role]?.findings || [];
-      if (
-        tools?.github &&
-        current.some((f) => JSON.stringify(f) === JSON.stringify(finding))
-      ) {
-        const posted = tools.posts.find(
-          (p) => p.role === role && p.finding_id === finding.id,
-        );
-        if (posted) {
-          card.append(githubCommentLink(posted.url));
-        } else {
-          const control = button("Post comment on GitHub", () =>
-            reviewAction("post_review_comment", {
-              role,
-              finding_id: finding.id,
-            }),
-          );
-          control.disabled = submitting || !!currentJob()?.running;
-          card.append(control);
-        }
-      }
-      parent.append(card);
+      if (group) group.push({ role, finding });
+      else groups.push([{ role, finding }]);
     }
+  }
+  return groups;
+}
+function renderFindingReport(
+  parent,
+  role,
+  finding,
+  equivalent = [{ role, finding }],
+) {
+  parent.append(prose(finding.impact));
+  const details = el("details");
+  details.append(el("summary", "Evidence and recommendation"));
+  section(details, "Conditions", finding.conditions);
+  section(details, "Sequence", finding.sequence.join(" → "));
+  section(details, "Evidence", finding.evidence);
+  section(details, "Recommendation", finding.recommendation);
+  details.append(el("small", `${finding.id} · ${finding.confidence}`));
+  parent.append(details);
+  const tools = state?.task?.review_actions;
+  const current = state?.task?.prompt?.reviews?.[role]?.findings || [];
+  if (
+    tools?.github &&
+    current.some((f) => JSON.stringify(f) === JSON.stringify(finding))
+  ) {
+    const posted = tools.posts.find((p) =>
+      equivalent.some(
+        (item) => p.role === item.role && p.finding_id === item.finding.id,
+      ),
+    );
+    if (posted) parent.append(githubCommentLink(posted.url));
+    else {
+      const control = button("Post comment on GitHub", () =>
+        reviewAction("post_review_comment", { role, finding_id: finding.id }),
+      );
+      control.disabled = submitting || !!currentJob()?.running;
+      parent.append(control);
+    }
+  }
+}
+function renderReviewerAnswers(parent, answers) {
+  const groups = new Map();
+  for (const [role, reply] of Object.entries(answers)) {
+    const key = String(reply.answer || "").trim();
+    if (groups.has(key)) groups.get(key).roles.push(role);
+    else groups.set(key, { roles: [role], answer: reply.answer });
+  }
+  for (const { roles, answer } of groups.values())
+    parent.append(el("h3", roles.map(reviewerName).join(" + ")), prose(answer));
+}
+function renderReviews(parent, reviews) {
+  // Keep independent summaries, but show identical answers only once with attribution.
+  renderReviewerAnswers(
+    parent,
+    Object.fromEntries(
+      Object.entries(reviews).map(([role, review]) => [
+        role,
+        { answer: review.summary },
+      ]),
+    ),
+  );
+  for (const group of groupedReviewFindings(reviews)) {
+    const { role, finding } = group[0];
+    const card = el("article", undefined, "review-finding");
+    const severity =
+      ["critical", "high", "medium", "low", "info"].find((level) =>
+        group.some((item) => item.finding.severity === level),
+      ) || finding.severity;
+    card.append(
+      el("strong", `${severity.toUpperCase()} · ${finding.title}`),
+      el("p", finding.location, "muted"),
+      el(
+        "small",
+        group
+          .map((item) => `${reviewerName(item.role)} · ${item.finding.id}`)
+          .join(" + "),
+        "muted",
+      ),
+    );
+    const equivalent = (report) =>
+      group.filter(
+        (item) => findingContent(item.finding) === findingContent(report),
+      );
+    renderFindingReport(card, role, finding, equivalent(finding));
+    const shown = new Set([findingContent(finding)]);
+    for (const other of group.slice(1)) {
+      if (shown.has(findingContent(other.finding))) continue;
+      shown.add(findingContent(other.finding));
+      // Same opening causal step and location is a related report, not proof of
+      // identical impact. Preserve every differing detail and its original action.
+      const additional = el("details");
+      additional.append(
+        el("summary", `Related report · ${reviewerName(other.role)}`),
+      );
+      additional.append(
+        el(
+          "strong",
+          `${other.finding.severity.toUpperCase()} · ${other.finding.title}`,
+        ),
+      );
+      renderFindingReport(
+        additional,
+        other.role,
+        other.finding,
+        equivalent(other.finding),
+      );
+      card.append(additional);
+    }
+    parent.append(card);
   }
 }
 async function reviewAction(action, fields = {}) {
@@ -1350,7 +1449,11 @@ function renderHistory(task) {
     else if (item.question) {
       history.append(message("You", item.question, true));
       if (item.answer) {
-        const entry = message("Agent", item.answer);
+        const entry = item.answers_by_role
+          ? el("article", undefined, "message")
+          : message("Agent", item.answer);
+        if (item.answers_by_role)
+          renderReviewerAnswers(entry, item.answers_by_role);
         renderSuggestedCommands(entry, item.suggested_commands);
         history.append(entry);
       }

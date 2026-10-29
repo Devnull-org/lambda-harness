@@ -3907,3 +3907,171 @@ test("New task clears old PR review details and cached bases without polling awa
   field("review-head").oninput();
   assert.equal(field("base").value, "develop");
 });
+
+function reviewFinding(overrides = {}) {
+  return {
+    id: "CODE-1",
+    severity: "high",
+    location: "src/Duration.hs:20",
+    title: "Removing Integral breaks callers",
+    conditions: "Build with tests",
+    sequence: [
+      "The change removes Integral Duration.",
+      "A caller still requires Integral.",
+    ],
+    impact: "Tests cannot compile.",
+    evidence: "Test.hs:12 uses fromIntegral.",
+    confidence: "confirmed",
+    recommendation: "Migrate callers.",
+    needs_test: false,
+    ...overrides,
+  };
+}
+
+test("overlapping reviewer reports share one card while preserving distinct caller evidence and actions", async () => {
+  const code = reviewFinding();
+  const security = reviewFinding({
+    id: "SEC-1",
+    severity: "medium",
+    title: "Remaining truncate callers fail",
+    evidence: "Cluster.hs:44 uses truncate.",
+    impact: "Cluster cannot compile.",
+  });
+  const reviews = {
+    haskell_reviewer: { summary: "Checked correctness.", findings: [code] },
+    security_reviewer: {
+      summary: "Checked trust boundaries.",
+      findings: [security],
+    },
+  };
+  const current = snapshot({
+    ...task(),
+    task_kind: "review",
+    stage: "standalone_review",
+    prompt: { reviews, actions: ["question"] },
+    review_actions: { github: true, token: "review-token", posts: [] },
+  });
+  const posted = [];
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") posted.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  const content = ui.run(
+    `(() => { const p = el("div"); renderReviews(p, ${JSON.stringify(reviews)}); return p; })()`,
+  );
+  const cards = descendants(content, "article");
+  assert.equal(cards.length, 1);
+  assert.match(
+    cards[0].textContent,
+    /Code review · CODE-1 \+ Security review · SEC-1/,
+  );
+  assert.match(cards[0].textContent, /Test.hs:12/);
+  assert.match(cards[0].textContent, /Cluster.hs:44/);
+  const related = cards[0].children.find(
+    (n) =>
+      n.tagName === "details" &&
+      n.children[0].textContent.startsWith("Related report"),
+  );
+  assert(related);
+  assert.equal(related.open, undefined);
+  await descendants(related, "button")[0].onclick();
+  assert.equal(posted[0].role, "security_reviewer");
+  assert.equal(posted[0].finding_id, "SEC-1");
+  assert.deepEqual(current.task.prompt.reviews, reviews);
+});
+
+test("exact duplicate findings and summaries render once with both reviewer attributions and existing receipts", async () => {
+  const finding = reviewFinding();
+  const reviews = {
+    haskell_reviewer: { summary: "Same assessment.", findings: [finding] },
+    security_reviewer: {
+      summary: "Same assessment.",
+      findings: [{ ...finding, id: "SEC-1" }],
+    },
+  };
+  const url = "https://github.com/example/project/pull/12#discussion_r123";
+  const ui = await app({
+    fetcher: async () =>
+      response(
+        snapshot({
+          ...task(),
+          prompt: { reviews, actions: ["question"] },
+          review_actions: {
+            github: true,
+            token: "token",
+            posts: [{ role: "security_reviewer", finding_id: "SEC-1", url }],
+          },
+        }),
+      ),
+  });
+  const content = ui.run(
+    `(() => { const p = el("div"); renderReviews(p, ${JSON.stringify(reviews)}); return p; })()`,
+  );
+  assert.equal(content.textContent.split("Same assessment.").length - 1, 1);
+  assert.equal(content.textContent.split(finding.impact).length - 1, 1);
+  assert.equal(descendants(content, "article").length, 1);
+  assert.equal(descendants(content, "button").length, 0);
+  assert.equal(descendants(content, "a")[0].href, url);
+  assert.match(content.textContent, /Security review · SEC-1/);
+});
+
+test("review grouping keeps separate causes, locations, and same-reviewer findings separate", async () => {
+  const ui = await app();
+  for (const other of [
+    reviewFinding({ id: "SEC-1", sequence: ["Authorization is missing."] }),
+    reviewFinding({ id: "SEC-1", location: "Other.hs:20" }),
+    reviewFinding({ id: "SEC-1", sequence: [] }),
+  ]) {
+    const reviews = {
+      haskell_reviewer: { findings: [reviewFinding()] },
+      security_reviewer: { findings: [other] },
+    };
+    assert.equal(
+      ui.run(`groupedReviewFindings(${JSON.stringify(reviews)}).length`),
+      2,
+    );
+  }
+  assert.equal(
+    ui.run(
+      `groupedReviewFindings(${JSON.stringify({ haskell_reviewer: { findings: [reviewFinding(), reviewFinding({ id: "CODE-2" })] } })}).length`,
+    ),
+    2,
+  );
+});
+
+test("identical reviewer follow-up answers display once without changing stored role conversations", async () => {
+  const answers = {
+    haskell_reviewer: { answer: "Same explanation." },
+    security_reviewer: { answer: "Same explanation." },
+  };
+  const current = snapshot({
+    ...task(),
+    messages: [
+      {
+        question: "Why?",
+        answer: "Old duplicated combined answer",
+        answers_by_role: answers,
+      },
+    ],
+  });
+  const ui = await app({ fetcher: async () => response(current) });
+  const text = ui.elements.get("history").textContent;
+  assert.equal(text.split("Same explanation.").length - 1, 1);
+  assert.match(text, /Code review \+ Security review/);
+  assert.doesNotMatch(text, /Old duplicated/);
+  assert.deepEqual(current.task.messages[0].answers_by_role, answers);
+});
+
+test("reviewer answers with different code indentation are not deduplicated", async () => {
+  const ui = await app();
+  const answers = {
+    haskell_reviewer: { answer: "```python\nif ready:\n  run()\n```" },
+    security_reviewer: { answer: "```python\nif ready:\nrun()\n```" },
+  };
+  const content = ui.run(
+    `(() => { const p = el("div"); renderReviewerAnswers(p, ${JSON.stringify(answers)}); return p; })()`,
+  );
+  assert.equal(descendants(content, "pre").length, 2);
+});
