@@ -2551,9 +2551,20 @@ $("new-form").onsubmit = (e) => {
     });
   guard(() => command(body));
 };
+function resetNewTask() {
+  $("new-form").reset();
+  // PR and branch comparison bases belong to this draft, not the next task.
+  reviewFromPR = false;
+  prBase = "";
+  branchBase = state?.base || "";
+  $("base").value = branchBase;
+  baseInitialized = !!branchBase;
+  updateNewTask();
+}
 $("new-task").onclick = () =>
   guard(async () => {
     selectTask(null);
+    resetNewTask();
     showPage("workspace");
     packetKey = "";
     await refresh();

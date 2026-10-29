@@ -691,6 +691,27 @@ async function app({
   const listeners = {};
   const downloads = [];
   const kind = { value: "explore" };
+  // Model native form.reset() using the defaults in the shipped HTML.
+  const formHtml = html.match(/<form id="new-form">([\s\S]*?)<\/form>/)[1];
+  elements.get("new-form").reset = () => {
+    kind.value = formHtml
+      .match(/<input[^>]*name="kind"[^>]*checked[^>]*>/)[0]
+      .match(/value="([^"]*)"/)[1];
+    for (const [, tag, attrs, body] of formHtml.matchAll(
+      /<(input|textarea|select)\b([^>]*)(?:>([\s\S]*?)<\/\1>|>)/g,
+    )) {
+      const id = attrs.match(/id="([^"]+)"/)?.[1];
+      if (!id) continue;
+      const field = elements.get(id);
+      field.value =
+        tag === "select"
+          ? body.match(/<option[^>]*value="([^"]*)"/)?.[1] || ""
+          : tag === "textarea"
+            ? body
+            : attrs.match(/value="([^"]*)"/)?.[1] || "";
+      field.checked = /\bchecked\b/.test(attrs);
+    }
+  };
   let timerId = 0;
   const timers = new Map();
   const context = vm.createContext({
@@ -3831,4 +3852,58 @@ test("empty fences do not add a newline and nested fences preserve code for Copy
     descendants(content, "pre").map((n) => n.textContent),
     ["", "echo hello\n"],
   );
+});
+
+test("New task clears old PR review details and cached bases without polling away a new draft", async () => {
+  const current = snapshot();
+  current.base = "develop";
+  const ui = await app({ fetcher: async () => response(current) });
+  const field = (id) => ui.elements.get(id);
+  ui.kind.value = "review";
+  field("task-name").value = "old-review";
+  field("request").value = "Review the old PR";
+  field("reviewers").value = "documentation";
+  field("base").value = "old-branch-base";
+  field("review-head").value = "https://github.com/example/project/pull/12";
+  field("review-head").oninput();
+  field("base").value = "old-pr-base";
+  field("test-packages").value = "old-package";
+  field("test-criteria").value = "Old behavior";
+  field("test-expectation").value = "green";
+  field("require-walkthrough").checked = true;
+
+  await field("new-task").onclick();
+  assert.equal(ui.kind.value, "explore");
+  for (const id of [
+    "task-name",
+    "request",
+    "review-head",
+    "test-packages",
+    "test-criteria",
+  ])
+    assert.equal(field(id).value, "", id);
+  assert.equal(field("reviewers").value, "both");
+  assert.equal(field("test-expectation").value, "red");
+  assert.equal(field("require-walkthrough").checked, false);
+  assert.equal(field("base").value, "develop");
+  assert.equal(field("base").required, true);
+  assert.equal(field("review-options").hidden, true);
+  assert.equal(field("review-head").required, false);
+  assert.equal(field("request").required, true);
+
+  ui.kind.value = "review";
+  field("review-head").value = "https://github.com/example/project/pull/34";
+  field("review-head").oninput();
+  assert.equal(field("base").value, "");
+  assert.equal(field("base").required, false);
+  field("task-name").value = "new-review";
+  field("request").value = "Keep this new draft";
+  field("base").value = "new-pr-base";
+  await ui.run("refresh()");
+  assert.equal(field("task-name").value, "new-review");
+  assert.equal(field("request").value, "Keep this new draft");
+  assert.equal(field("base").value, "new-pr-base");
+  field("review-head").value = "feature/new";
+  field("review-head").oninput();
+  assert.equal(field("base").value, "develop");
 });
