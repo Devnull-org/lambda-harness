@@ -4329,12 +4329,12 @@ test("continuation controls follow the chat input and expose approved specificat
   assert.equal(posted.automatic, true);
 });
 
-test("incomplete coverage explains the rejected proposal and drafts a task-scoped request", async () => {
+test("compact status continues incomplete coverage and keeps details collapsed", async () => {
   const current = snapshot({
     ...task(),
     mode: "full",
     stage: "agent_error",
-    prompt: { actions: ["question", "retry", "choose_phase"] },
+    prompt: { actions: ["question", "retry", "revise_tests", "choose_phase"] },
     outcome: {
       kind: "error",
       title: "Test proposal incomplete",
@@ -4366,21 +4366,35 @@ test("incomplete coverage explains the rejected proposal and drafts a task-scope
   assert.match(status.textContent, /Stopped during: tests/);
   assert.match(status.textContent, /proposal changed no files/);
   assert.match(status.textContent, /validation did not run/);
-  assert.match(status.textContent, /Automatic continuation is paused/);
+  assert.equal(
+    status.children[0].textContent,
+    "Paused · 1 criterion needs tests",
+  );
+  assert.equal(status.children.length, 3);
+  assert.equal(status.children[2].tagName, "details");
+  assert.ok(!status.children[2].open);
   assert.match(status.textContent, /A2Handle <boundary> safely/);
   assert.match(status.textContent, /test\/Example.hs/);
-  const draft = descendants(status, "button").find(
-    (b) => b.textContent === "Draft request to complete coverage",
+  const instructions = descendants(status, "button").find(
+    (b) => b.textContent === "Give instructions",
   );
   ui.elements.get("message").value = "Keep my existing instruction.";
-  await draft.onclick();
-  assert.match(
+  await instructions.onclick();
+  assert.equal(
     ui.elements.get("message").value,
-    /^Keep my existing instruction\./,
+    "Keep my existing instruction.",
   );
-  assert.match(ui.elements.get("message").value, /including: A2/);
   assert.equal(ui.elements.get("message-action").value, "question");
   assert.equal(commands.length, 0);
+  const next = descendants(status, "button").find(
+    (b) => b.textContent === "Continue",
+  );
+  await next.onclick();
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].command, "respond");
+  assert.equal(commands[0].action, "revise_tests");
+  assert.equal(commands[0].task_id, "example");
+  assert.equal(commands[0].automatic, true);
   const log = descendants(status, "button").find(
     (b) => b.textContent === "Show activity log",
   );
@@ -4395,5 +4409,26 @@ test("incomplete coverage explains the rejected proposal and drafts a task-scope
   assert.doesNotMatch(
     status.textContent,
     /criteria need named tests|proposal changed no files/,
+  );
+});
+
+test("compact continuation keeps approval explicit and selects the next available phase", async () => {
+  const ui = await app();
+  const approval = ui.run(
+    'taskContinuation({task_id:"example", prompt:{actions:["approve"], approval_token:"token"}})',
+  );
+  assert.equal(approval.label, "Approve & continue");
+  assert.equal(approval.body.action, "approve");
+  assert.equal(approval.body.token, "token");
+  const phase = ui.run(
+    'taskContinuation({task_id:"example", prompt:{actions:[], available_phases:["tests", "implement"]}})',
+  );
+  assert.equal(phase.body.command, "run");
+  assert.equal(phase.body.phase, "tests");
+  assert.equal(
+    ui.run(
+      'taskContinuation({task_id:"example", prompt:{actions:["answer"]}})',
+    ),
+    null,
   );
 });

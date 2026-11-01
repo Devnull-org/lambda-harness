@@ -307,5 +307,23 @@ def test_incomplete_test_proposal_exposes_evidence_without_applying_it(rig):
     # Previously saved failures recover the same evidence from their saved proposal.
     legacy = copy.deepcopy(harness._state("task"))
     del legacy["prompt"]["coverage_gap"]
+    del legacy["rejected_test_proposal"]
     assert harness._view(legacy)["outcome"]["coverage_gap"] == gap
     assert "coverage_gap" not in legacy["prompt"]
+
+    assert "revise_tests" in view["prompt"]["actions"]
+    agent.responses["test_author"].append(
+        {
+            "summary": "Revised test proposal",
+            "changes": [{"path": TEST, "content": TEST_CONTENT}],
+            "expected_failures": [FAILURE_ID],
+            "coverage": {"A1": [FAILURE_ID], "A2": [FAILURE_ID]},
+            "commit_message": "test: complete coverage",
+        }
+    )
+    continued = harness.respond("task", "revise_tests", automatic=True)
+    context = agent.calls[-1][1]
+    assert context["test_revision"]["missing_criteria"] == gap["missing"]
+    assert context["test_revision"]["previous_proposal"]["summary"] == gap["summary"]
+    assert continued["stage"] == "test_review"
+    assert not any(role == "implementer" for role, _, _ in agent.calls)

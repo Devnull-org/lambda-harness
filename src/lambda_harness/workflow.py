@@ -30,6 +30,8 @@ from .recovery import (
     coverage_gap,
     recovery_actions,
     recovery_prompt,
+    saved_coverage_gap,
+    saved_test_proposal,
 )
 from .reports import chat_report, exploration_report, pr_description, standalone_review_report
 from .review_context import review_diff
@@ -1396,10 +1398,12 @@ class Harness(CheckRunner):
         proposal = self._ask(
             state,
             "test_author",
+            test_revision=state.get("test_revision"),
             specification_status=(
                 "developer_supplied" if state.get("task_kind") == "tests" else "approved"
             ),
         )
+        state.pop("test_revision", None)
         if not proposal["changes"]:
             state["messages"].append({"role": "test_author", "answer": proposal["summary"]})
             self._gate(
@@ -1409,6 +1413,7 @@ class Harness(CheckRunner):
         criteria = {c["id"] for c in state["specification"]["acceptance_criteria"]}
         if not all(proposal["coverage"].get(key) for key in criteria):
             state["retry_node"] = "tests"
+            state["rejected_test_proposal"] = proposal
             self._gate(
                 state,
                 "agent_error",
@@ -2044,7 +2049,24 @@ class Harness(CheckRunner):
         action, stage = response["action"], state["stage"]
         if "automatic" in response:
             state["mode"] = "full" if response["automatic"] else "phased"
-        if stage.startswith("checks_"):
+        if action == "revise_tests":
+            gap = saved_coverage_gap(state)
+            state["test_revision"] = {
+                "previous_proposal": saved_test_proposal(state),
+                "missing_criteria": gap["missing"],
+                "instruction": "Complete the test proposal with meaningful named tests for every "
+                "acceptance criterion. Preserve useful tests from the previous proposal. "
+                "Do not invent coverage; if a design decision is needed, return a scope decision.",
+            }
+            state["messages"].append(
+                {
+                    "agent_role": "test_author",
+                    "text": "Continue: revise the incomplete test proposal "
+                    "to cover the missing criteria.",
+                }
+            )
+            state["next"] = "tests"
+        elif stage.startswith("checks_"):
             self._checks_reply(state, action, response.get("text", ""))
         elif action == "continue_without_commits":
             self._continue_without_commits(state)

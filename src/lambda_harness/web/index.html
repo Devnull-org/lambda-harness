@@ -702,12 +702,12 @@
           role="status"
           aria-live="polite"
         ></section>
-        <section
+        <details
           id="task-controls"
           class="panel"
           aria-labelledby="task-controls-title"
         >
-          <h2 id="task-controls-title">Task actions</h2>
+          <summary id="task-controls-title">More task actions</summary>
           <div id="execution-controls">
             <label for="execution-mode">How to continue</label>
             <select id="execution-mode">
@@ -739,7 +739,7 @@
             ><button id="export-task" class="quiet">Export handoff</button
             ><button id="abandon" class="quiet danger">Delete task</button>
           </div>
-        </section>
+        </details>
         <details id="activity-log" hidden>
           <summary>Activity log</summary>
           <pre id="log"></pre>

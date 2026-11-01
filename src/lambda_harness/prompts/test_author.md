@@ -29,3 +29,7 @@ must appear in the actual JUnit execution evidence, including passing coverage t
 For review fixes, add a failing regression test for the concrete finding. Use feedback
 to revise the tests, preserving earlier approved behavior. If the requested behavior
 cannot be tested without a design decision, report that clearly in summary.
+
+When test_revision is supplied, revise its previous_proposal to address the listed
+missing_criteria. Return the complete replacement patch and coverage map. Keep useful
+existing assertions. The previous proposal has not been applied or validated.

@@ -259,6 +259,7 @@ const labels = {
   revise: "Revise instructions",
   approve: "Approve",
   retry: "Retry unchanged",
+  revise_tests: "Complete missing test coverage",
   recheck: "Run checks again",
   reject: "Reject changes",
   skip: "Skip",
@@ -1753,14 +1754,64 @@ async function copyWorktree() {
 }
 $("copy-worktree").onclick = copyWorktree;
 
-function draftStatusRequest(task, text) {
+function focusTaskInstructions(task) {
   if (selected !== task.task_id || $("message").disabled) return;
-  const field = $("message");
-  field.value = field.value.trim() ? field.value + "\n\n" + text : text;
-  taskDrafts.set(taskScope(), field.value);
-  $("message-action").value = "question";
-  field.focus();
-  field.scrollIntoView({ block: "center" });
+  const actions = task.prompt?.actions || [];
+  $("message-action").value = actions.includes("question")
+    ? "question"
+    : actions.find((action) => textActions.includes(action)) || "task_chat";
+  $("message").focus();
+  $("message").scrollIntoView({ block: "center" });
+}
+function taskContinuation(task) {
+  const actions = task.prompt?.actions || [];
+  for (const action of [
+    "revise_tests",
+    "repair",
+    "retry",
+    "recheck",
+    "approve_changes",
+    "approve",
+    "run_checks",
+    "continue_handoff",
+    "done",
+  ]) {
+    if (actions.includes(action))
+      return {
+        label: [
+          "approve_changes",
+          "approve",
+          "run_checks",
+          "continue_handoff",
+        ].includes(action)
+          ? "Approve & continue"
+          : "Continue",
+        body: {
+          command: "respond",
+          task_id: task.task_id,
+          action,
+          token: task.prompt.approval_token,
+        },
+      };
+  }
+  const phases = task.prompt?.available_phases || [];
+  const phase = [
+    "tests",
+    "implement",
+    "refactor",
+    "review-haskell",
+    "review-security",
+    "walkthrough",
+    "handoff",
+    "interview",
+    "explore",
+  ].find((name) => phases.includes(name));
+  return phase
+    ? {
+        label: "Continue",
+        body: { command: "run", task_id: task.task_id, phase },
+      }
+    : null;
 }
 function renderCoverageGap(parent, task, gap) {
   parent.append(
@@ -1789,27 +1840,8 @@ function renderCoverageGap(parent, task, gap) {
   proposal.append(el("h3", "Proposed files · not applied"));
   for (const path of gap.files) proposal.append(el("div", path, "status-path"));
   parent.append(proposal);
-  if (task.prompt?.actions?.includes("question")) {
-    parent.append(
-      button(
-        "Draft request to complete coverage",
-        () =>
-          draftStatusRequest(
-            task,
-            "Revise the rejected test proposal to provide meaningful named tests for every acceptance criterion, including: " +
-              gap.missing.map((item) => item.id).join(", ") +
-              ". Keep useful tests from the saved proposal. Do not invent coverage or treat proposed tests as executed. If a criterion cannot be tested yet, explain the specific design decision needed. Continue through the normal validation and review gates.",
-          ),
-        "quiet",
-      ),
-      el(
-        "small",
-        "Adds an editable request to chat. Review it and press Send to start.",
-        "muted",
-      ),
-    );
-  }
 }
+
 function renderTask(task, running) {
   const working =
     currentJob()?.running && currentJob().task_id === task.task_id;
@@ -1854,32 +1886,62 @@ function renderTask(task, running) {
   if (status.dataset.outcome !== outcomeKey) {
     status.dataset.outcome = outcomeKey;
     status.dataset.kind = outcome.kind;
-    status.replaceChildren(el("h2", outcome.title));
-    if (outcome.step)
-      status.append(el("p", "Stopped during: " + outcome.step, "muted"));
-    if (outcome.detail) status.append(prose(outcome.detail));
-    if (outcome.coverage_gap)
-      renderCoverageGap(status, task, outcome.coverage_gap);
-    if (!working && outcome.kind === "error") {
-      status.append(
-        prose(
-          task.mode === "full"
-            ? "Automatic continuation is paused. Nothing else is running for this task."
-            : "This step has stopped. Nothing else is running for this task.",
-        ),
+    const gap = outcome.coverage_gap;
+    status.replaceChildren(
+      el(
+        "h2",
+        gap
+          ? `Paused · ${gap.missing.length} ${gap.missing.length === 1 ? "criterion needs" : "criteria need"} tests`
+          : outcome.title,
+      ),
+    );
+    const controls = el("div", undefined, "button-row");
+    const continuation = taskContinuation(task);
+    if (!working && !connectionError && continuation) {
+      const next = button(
+        continuation.label,
+        () => {
+          if (selected !== task.task_id) return;
+          return command(continuation.body);
+        },
+        "primary",
       );
+      next.disabled = running;
+      controls.append(next);
     }
-    if (outcome.guidance) status.append(prose(outcome.guidance));
+    if (
+      !working &&
+      (task.can_task_chat ||
+        task.prompt?.actions?.some((action) => textActions.includes(action)))
+    ) {
+      const instructions = button(
+        "Give instructions",
+        () => focusTaskInstructions(task),
+        "quiet",
+      );
+      instructions.disabled = running || !!connectionError;
+      controls.append(instructions);
+    }
+    status.append(controls);
+    const details = el("details", undefined, "status-evidence");
+    details.append(el("summary", "Details"));
+    if (outcome.step) details.append(prose("Stopped during: " + outcome.step));
+    if (outcome.detail) details.append(prose(outcome.detail));
+    if (gap) renderCoverageGap(details, task, gap);
+    if (outcome.guidance) details.append(prose(outcome.guidance));
     if (
       !working &&
       (task.prompt?.actions?.length || task.prompt?.available_phases?.length)
     ) {
-      const link = el("a", "Choose next action ↓");
+      const link = el("a", "More actions");
       link.href = "#task-controls";
-      status.append(link);
+      link.onclick = () => {
+        $("task-controls").open = true;
+      };
+      details.append(link);
     }
     if (currentJob()?.task_id === task.task_id && currentJob()?.log?.length) {
-      status.append(
+      details.append(
         button(
           "Show activity log",
           () => {
@@ -1891,7 +1953,9 @@ function renderTask(task, running) {
         ),
       );
     }
+    status.append(details);
   }
+
   $("execution-controls").hidden =
     (task.task_kind || "feature") !== "feature" ||
     task.stage === "ready" ||
@@ -1993,7 +2057,7 @@ function renderTask(task, running) {
       !(task.messages || []).some((item) => item.answer === prompt.summary)
     )
       packet.append(el("h2", prompt.summary));
-    if (prompt.error) packet.append(prose(prompt.error));
+    if (prompt.error && !task.outcome) packet.append(prose(prompt.error));
     if (prompt.guidance) packet.append(prose(prompt.guidance));
     if (task.check_plan && task.stage.startsWith("checks_")) {
       const plan = task.check_plan;

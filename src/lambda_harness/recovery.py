@@ -19,20 +19,28 @@ def coverage_gap(specification, proposal):
     }
 
 
+def saved_test_proposal(state):
+    if proposal := state.get("rejected_test_proposal"):
+        return proposal
+    directory = Path(state["directory"]) / "proposals"
+    for path in sorted(directory.glob("*-test_author.json"), reverse=True):
+        try:
+            proposal = json.loads(path.read_text())
+            if proposal.get("changes") and "coverage" in proposal:
+                return proposal
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
+
+
 def saved_coverage_gap(state):
     """Recover evidence for old checkpoints without changing their approval or retry state."""
     if state.get("retry_node") != "tests" or state.get("prompt", {}).get("error") != COVERAGE_ERROR:
         return None
     if gap := state["prompt"].get("coverage_gap"):
         return gap
-    directory = Path(state["directory"]) / "proposals"
-    for path in sorted(directory.glob("*-test_author.json"), reverse=True):
-        try:
-            proposal = json.loads(path.read_text())
-            if proposal.get("changes") and "coverage" in proposal:
-                return coverage_gap(state["specification"], proposal)
-        except (OSError, ValueError, KeyError, TypeError):
-            continue
+    if proposal := saved_test_proposal(state):
+        return coverage_gap(state["specification"], proposal)
     return None
 
 
@@ -48,6 +56,8 @@ def recovery_actions(state):
     actions = list(state.get("prompt", {}).get("actions", []))
     if can_recover(state):
         actions.append("question")
+    if can_recover(state) and saved_coverage_gap(state):
+        actions.append("revise_tests")
     if commit_failed(state):
         actions.append("continue_without_commits")
     return list(dict.fromkeys(actions))
