@@ -1,6 +1,39 @@
 """Recovery choices derived from the failed operation, independent of agent role."""
 
+import json
 import re
+from pathlib import Path
+
+COVERAGE_ERROR = "Tests must map every acceptance criterion to named test cases"
+
+
+def coverage_gap(specification, proposal):
+    criteria = specification["acceptance_criteria"]
+    missing = [item for item in criteria if not proposal["coverage"].get(item["id"])]
+    return {
+        "total": len(criteria),
+        "mapped": len(criteria) - len(missing),
+        "missing": missing,
+        "summary": proposal["summary"],
+        "files": [change["path"] for change in proposal["changes"]],
+    }
+
+
+def saved_coverage_gap(state):
+    """Recover evidence for old checkpoints without changing their approval or retry state."""
+    if state.get("retry_node") != "tests" or state.get("prompt", {}).get("error") != COVERAGE_ERROR:
+        return None
+    if gap := state["prompt"].get("coverage_gap"):
+        return gap
+    directory = Path(state["directory"]) / "proposals"
+    for path in sorted(directory.glob("*-test_author.json"), reverse=True):
+        try:
+            proposal = json.loads(path.read_text())
+            if proposal.get("changes") and "coverage" in proposal:
+                return coverage_gap(state["specification"], proposal)
+        except (OSError, ValueError, KeyError, TypeError):
+            continue
+    return None
 
 
 def can_recover(state):
@@ -23,6 +56,8 @@ def recovery_actions(state):
 def recovery_prompt(state):
     prompt = dict(state["prompt"])
     prompt["actions"] = recovery_actions(state)
+    if gap := saved_coverage_gap(state):
+        prompt["coverage_gap"] = gap
     if commit_failed(state):
         prompt["guidance"] = (
             "The commit step failed. Your files are still in the task worktree. "
@@ -52,6 +87,6 @@ def recovery_prompt(state):
     else:
         prompt["guidance"] = (
             prompt.get("guidance", "") + " " + "Ask what failed, request commands to resolve it, "
-            "or describe a different approach. Choose a recovery action to continue."
+            "or describe a different approach."
         ).strip()
     return prompt

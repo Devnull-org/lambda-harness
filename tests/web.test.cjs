@@ -4328,3 +4328,72 @@ test("continuation controls follow the chat input and expose approved specificat
   assert.equal(posted.phase, "tests");
   assert.equal(posted.automatic, true);
 });
+
+test("incomplete coverage explains the rejected proposal and drafts a task-scoped request", async () => {
+  const current = snapshot({
+    ...task(),
+    mode: "full",
+    stage: "agent_error",
+    prompt: { actions: ["question", "retry", "choose_phase"] },
+    outcome: {
+      kind: "error",
+      title: "Test proposal incomplete",
+      step: "tests",
+      detail: "Test mappings for 1 of 2 acceptance criteria.",
+      coverage_gap: {
+        total: 2,
+        mapped: 1,
+        missing: [{ id: "A2", description: "Handle <boundary> safely" }],
+        summary: "Only the first criterion is covered.",
+        files: ["test/Example.hs"],
+      },
+    },
+  });
+  current.job = {
+    id: "failed",
+    task_id: "example",
+    running: false,
+    log: ["Test author returned"],
+  };
+  const commands = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (url === "/api/command") commands.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  const status = ui.elements.get("task-outcome");
+  assert.match(status.textContent, /Stopped during: tests/);
+  assert.match(status.textContent, /proposal changed no files/);
+  assert.match(status.textContent, /validation did not run/);
+  assert.match(status.textContent, /Automatic continuation is paused/);
+  assert.match(status.textContent, /A2Handle <boundary> safely/);
+  assert.match(status.textContent, /test\/Example.hs/);
+  const draft = descendants(status, "button").find(
+    (b) => b.textContent === "Draft request to complete coverage",
+  );
+  ui.elements.get("message").value = "Keep my existing instruction.";
+  await draft.onclick();
+  assert.match(
+    ui.elements.get("message").value,
+    /^Keep my existing instruction\./,
+  );
+  assert.match(ui.elements.get("message").value, /including: A2/);
+  assert.equal(ui.elements.get("message-action").value, "question");
+  assert.equal(commands.length, 0);
+  const log = descendants(status, "button").find(
+    (b) => b.textContent === "Show activity log",
+  );
+  await log.onclick();
+  assert.equal(ui.elements.get("activity-log").open, true);
+  assert.equal(
+    ui.elements.get("activity-log").scrollCalls.at(-1).block,
+    "start",
+  );
+  current.job.running = true;
+  await ui.run("refresh()");
+  assert.doesNotMatch(
+    status.textContent,
+    /criteria need named tests|proposal changed no files/,
+  );
+});

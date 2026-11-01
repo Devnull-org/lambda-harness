@@ -1753,6 +1753,63 @@ async function copyWorktree() {
 }
 $("copy-worktree").onclick = copyWorktree;
 
+function draftStatusRequest(task, text) {
+  if (selected !== task.task_id || $("message").disabled) return;
+  const field = $("message");
+  field.value = field.value.trim() ? field.value + "\n\n" + text : text;
+  taskDrafts.set(taskScope(), field.value);
+  $("message-action").value = "question";
+  field.focus();
+  field.scrollIntoView({ block: "center" });
+}
+function renderCoverageGap(parent, task, gap) {
+  parent.append(
+    el("h3", "What happened"),
+    prose(
+      "A test proposal was returned. It was rejected before application. This proposal changed no files, and validation did not run for it. Test mappings are claims from the agent, not verified test results.",
+    ),
+  );
+  const missing = el("details", undefined, "status-evidence");
+  missing.append(
+    el("summary", `${gap.missing.length} criteria need named tests`),
+  );
+  const list = el("ul");
+  for (const criterion of gap.missing) {
+    const item = el("li");
+    item.append(el("strong", criterion.id), prose(criterion.description));
+    list.append(item);
+  }
+  missing.append(list);
+  parent.append(missing);
+  const proposal = el("details", undefined, "status-evidence");
+  proposal.append(
+    el("summary", "Agent’s proposal and explanation"),
+    prose(gap.summary),
+  );
+  proposal.append(el("h3", "Proposed files · not applied"));
+  for (const path of gap.files) proposal.append(el("div", path, "status-path"));
+  parent.append(proposal);
+  if (task.prompt?.actions?.includes("question")) {
+    parent.append(
+      button(
+        "Draft request to complete coverage",
+        () =>
+          draftStatusRequest(
+            task,
+            "Revise the rejected test proposal to provide meaningful named tests for every acceptance criterion, including: " +
+              gap.missing.map((item) => item.id).join(", ") +
+              ". Keep useful tests from the saved proposal. Do not invent coverage or treat proposed tests as executed. If a criterion cannot be tested yet, explain the specific design decision needed. Continue through the normal validation and review gates.",
+          ),
+        "quiet",
+      ),
+      el(
+        "small",
+        "Adds an editable request to chat. Review it and press Send to start.",
+        "muted",
+      ),
+    );
+  }
+}
 function renderTask(task, running) {
   const working =
     currentJob()?.running && currentJob().task_id === task.task_id;
@@ -1787,16 +1844,31 @@ function renderTask(task, running) {
   const status = $("task-outcome");
   // Avoid repeated screen-reader announcements when polling an unchanged result.
   const outcomeKey = JSON.stringify([
+    taskScope(),
     outcome,
     task.prompt?.actions,
     task.prompt?.available_phases,
     working,
+    !!currentJob()?.log?.length,
   ]);
   if (status.dataset.outcome !== outcomeKey) {
     status.dataset.outcome = outcomeKey;
     status.dataset.kind = outcome.kind;
     status.replaceChildren(el("h2", outcome.title));
+    if (outcome.step)
+      status.append(el("p", "Stopped during: " + outcome.step, "muted"));
     if (outcome.detail) status.append(prose(outcome.detail));
+    if (outcome.coverage_gap)
+      renderCoverageGap(status, task, outcome.coverage_gap);
+    if (!working && outcome.kind === "error") {
+      status.append(
+        prose(
+          task.mode === "full"
+            ? "Automatic continuation is paused. Nothing else is running for this task."
+            : "This step has stopped. Nothing else is running for this task.",
+        ),
+      );
+    }
     if (outcome.guidance) status.append(prose(outcome.guidance));
     if (
       !working &&
@@ -1805,6 +1877,19 @@ function renderTask(task, running) {
       const link = el("a", "Choose next action ↓");
       link.href = "#task-controls";
       status.append(link);
+    }
+    if (currentJob()?.task_id === task.task_id && currentJob()?.log?.length) {
+      status.append(
+        button(
+          "Show activity log",
+          () => {
+            const log = $("activity-log");
+            log.open = true;
+            log.scrollIntoView({ block: "start" });
+          },
+          "quiet",
+        ),
+      );
     }
   }
   $("execution-controls").hidden =

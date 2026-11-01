@@ -23,7 +23,14 @@ from .failures import AgentInterrupted, BackendError, BackendResponseError
 from .github_actions import post_review_comment
 from .link_checks import check_documentation_links
 from .project_context import ContextStore, state_directory
-from .recovery import can_recover, commit_failed, recovery_actions, recovery_prompt
+from .recovery import (
+    COVERAGE_ERROR,
+    can_recover,
+    commit_failed,
+    coverage_gap,
+    recovery_actions,
+    recovery_prompt,
+)
 from .reports import chat_report, exploration_report, pr_description, standalone_review_report
 from .review_context import review_diff
 from .review_source import resolve_review
@@ -879,7 +886,21 @@ class Harness(CheckRunner):
             kind, title = "waiting", "Your input is needed"
             detail = prompt.get("summary", stage.replace("_", " ").capitalize())
             guidance = "Choose an action below to continue."
-        return {"kind": kind, "title": title, "detail": detail, "guidance": guidance}
+        outcome = {"kind": kind, "title": title, "detail": detail, "guidance": guidance}
+        if stage in errors:
+            outcome["step"] = state.get("retry_node", "validate").replace("_", " ")
+        if gap := prompt.get("coverage_gap"):
+            outcome.update(
+                title="Test proposal incomplete",
+                detail=f"The agent returned a proposal with test mappings for {gap['mapped']} "
+                f"of {gap['total']} acceptance criteria. "
+                "The harness requires a mapping for every criterion.",
+                guidance="Request a revised proposal covering the missing criteria, "
+                "or choose another step "
+                "to revisit the scope. Retry unchanged sends the same instructions again.",
+                coverage_gap=gap,
+            )
+        return outcome
 
     @staticmethod
     def _can_choose_phase(state):
@@ -1387,7 +1408,17 @@ class Harness(CheckRunner):
             return
         criteria = {c["id"] for c in state["specification"]["acceptance_criteria"]}
         if not all(proposal["coverage"].get(key) for key in criteria):
-            raise ValueError("Tests must map every acceptance criterion to named test cases")
+            state["retry_node"] = "tests"
+            self._gate(
+                state,
+                "agent_error",
+                {
+                    "error": COVERAGE_ERROR,
+                    "coverage_gap": coverage_gap(state["specification"], proposal),
+                },
+                ["retry"],
+            )
+            return
         self._workspace(state).apply(proposal["changes"], tests_only=True)
         state["test_strategy"] = "new"
         state["test_paths"] = sorted(

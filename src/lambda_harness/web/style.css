@@ -66,6 +66,24 @@
   border-color: var(--warm);
   background: var(--warm-bg);
 }
+.status-evidence {
+  margin: 0.9rem 0;
+  padding: 0.75rem;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--soft);
+}
+.status-evidence summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+.status-path {
+  overflow-wrap: anywhere;
+}
+.task-outcome > small {
+  display: block;
+  margin-top: 0.5rem;
+}
 /* Adapted from Ghostty's Flexoki Light and TokyoNight Day / Night palettes.
    Application surfaces and contrast are tuned for reading long conversations. */
 :root[data-theme="tokyo-day"] {
