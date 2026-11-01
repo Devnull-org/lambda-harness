@@ -625,6 +625,20 @@
           </button>
           <span id="worktree-status" class="muted" role="status"></span>
         </div>
+        <div class="conversation-heading">
+          <h2>Conversation</h2>
+          <div class="button-row">
+            <a href="#task-controls">Task actions ↓</a>
+            <button id="latest-message" class="quiet">Latest message ↓</button>
+          </div>
+        </div>
+        <div
+          id="history"
+          role="log"
+          aria-label="Conversation"
+          aria-live="polite"
+          tabindex="0"
+        ></div>
         <section
           id="task-outcome"
           class="panel task-outcome"
@@ -669,17 +683,6 @@
             ><button id="abandon" class="quiet danger">Delete task</button>
           </div>
         </section>
-        <div class="conversation-heading">
-          <h2>Conversation</h2>
-          <button id="latest-message" class="quiet">Latest message ↓</button>
-        </div>
-        <div
-          id="history"
-          role="log"
-          aria-label="Conversation"
-          aria-live="polite"
-          tabindex="0"
-        ></div>
         <div id="reply-model-picker" class="model-picker" hidden>
           <label for="reply-chat-model">Model for the next response</label>
           <div class="model-controls">

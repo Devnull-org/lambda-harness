@@ -490,6 +490,18 @@ class Harness(CheckRunner):
             messages.append({"role": role, "text": text, "task_chat_message": turn + ":user"})
             save_json(path, messages)
             state["messages"] = conversation_messages(state)
+            current = self._view(state)
+            workflow_status = {
+                "stage": current["stage"],
+                "outcome": current["outcome"],
+                "actions": current["prompt"].get("actions", []),
+                "available_phases": current["prompt"].get("available_phases", []),
+                "specification_status": {
+                    "specification_ready": "approved",
+                    "specification_review": "awaiting_approval",
+                    "interview": "draft",
+                }.get(current["stage"]),
+            }
             try:
                 result = self._ask(
                     state,
@@ -499,6 +511,7 @@ class Harness(CheckRunner):
                     latest_user_message=text,
                     messages=state["messages"],
                     task_stage=state["stage"],
+                    workflow_status=workflow_status,
                     pending_step=state.get("prompt"),
                     check_results=state.get("check_results"),
                     findings=state.get("findings", []),
@@ -840,6 +853,14 @@ class Harness(CheckRunner):
             kind, title = "paused", "Stopped by request"
             detail = prompt.get("summary", "The operation was stopped.")
             guidance = "Choose Retry or send new instructions when you want to continue."
+        elif stage == "specification_ready":
+            kind, title = "success", "Specification approved"
+            detail = "Requirements are approved. No further specification approval is needed."
+            guidance = (
+                "Choose Write failing tests for new coverage, or Implement using existing tests. "
+                "To continue through later steps, select All remaining steps automatically "
+                "before starting. Permissions and errors still pause for your input."
+            )
         elif stage in completed or state.get("next") == "end":
             kind = "success"
             title = "Task complete" if stage in completed else "Step complete"

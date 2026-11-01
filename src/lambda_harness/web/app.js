@@ -1786,14 +1786,22 @@ function renderTask(task, running) {
         : task.outcome || { kind: "waiting", title: stageLabel(task.stage) };
   const status = $("task-outcome");
   // Avoid repeated screen-reader announcements when polling an unchanged result.
-  const outcomeKey = JSON.stringify(outcome);
+  const outcomeKey = JSON.stringify([
+    outcome,
+    task.prompt?.actions,
+    task.prompt?.available_phases,
+    working,
+  ]);
   if (status.dataset.outcome !== outcomeKey) {
     status.dataset.outcome = outcomeKey;
     status.dataset.kind = outcome.kind;
     status.replaceChildren(el("h2", outcome.title));
     if (outcome.detail) status.append(prose(outcome.detail));
     if (outcome.guidance) status.append(prose(outcome.guidance));
-    if (!working && task.prompt?.actions?.length) {
+    if (
+      !working &&
+      (task.prompt?.actions?.length || task.prompt?.available_phases?.length)
+    ) {
       const link = el("a", "Choose next action ↓");
       link.href = "#task-controls";
       status.append(link);
@@ -2122,8 +2130,12 @@ function renderTask(task, running) {
       ["implement", "refactor"].includes(phase)
         ? `${phaseLabels[phase]} using existing tests`
         : phaseLabels[phase] || phase;
-    const control = button(label, () =>
-      command({ command: "run", task_id: selected, phase }),
+    const control = button(
+      label,
+      () => command({ command: "run", task_id: selected, phase }),
+      task.stage === "specification_ready" && phase === "tests"
+        ? "primary"
+        : "",
     );
     control.disabled = running;
     $("phases").append(control);

@@ -4278,3 +4278,50 @@ for (const reducedMotion of [false, true]) {
     assert.equal(button.hidden, true);
   });
 }
+
+test("continuation controls follow the conversation and expose approved specification next steps", async () => {
+  const html = readFileSync("src/lambda_harness/web/index.html", "utf8");
+  assert(html.indexOf('id="history"') < html.indexOf('id="task-outcome"'));
+  assert(
+    html.indexOf('id="task-outcome"') < html.indexOf('id="task-controls"'),
+  );
+  assert(
+    html.indexOf('id="task-controls"') <
+      html.indexOf('id="reply-model-picker"'),
+  );
+  assert.equal(html.match(/id="task-controls"/g).length, 1);
+  const current = snapshot({
+    ...task(),
+    stage: "specification_ready",
+    mode: "phased",
+    outcome: {
+      kind: "success",
+      title: "Specification approved",
+      detail: "No further specification approval is needed.",
+    },
+    prompt: { actions: [], available_phases: ["tests", "implement"] },
+  });
+  let posted;
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") posted = JSON.parse(options.body);
+      return response(current);
+    },
+  });
+  assert.equal(ui.elements.get("next-phases").hidden, false);
+  assert.equal(ui.elements.get("actions").children.length, 0);
+  const link = descendants(ui.elements.get("task-outcome"), "a")[0];
+  assert.equal(link.href, "#task-controls");
+  const startTests = ui.elements
+    .get("phases")
+    .children.find(
+      (n) => n.tagName === "button" && n.textContent === "Write failing tests",
+    );
+  assert.equal(startTests.className, "primary");
+  ui.elements.get("execution-mode").value = "full";
+  ui.elements.get("execution-mode").onchange();
+  await startTests.onclick();
+  assert.equal(posted.command, "run");
+  assert.equal(posted.phase, "tests");
+  assert.equal(posted.automatic, true);
+});

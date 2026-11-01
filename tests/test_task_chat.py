@@ -96,3 +96,27 @@ def test_failed_task_chat_keeps_workflow_and_can_be_retried(rig):
     assert conversation_messages(harness._state("task"))[-1]["answer"] == "Here is the explanation"
     with pytest.raises(ValueError, match="Enter a question"):
         harness.task_chat("task", "  ")
+
+
+def test_task_chat_receives_authoritative_approval_and_available_next_steps(rig):
+    harness, agent, executor = rig
+    pending = harness.start("task", "Fix addOne")
+    harness.task_chat("task", "What do I do next?")
+    status = agent.calls[-1][1]["workflow_status"]
+    assert status["specification_status"] == "awaiting_approval"
+    assert "approve" in status["actions"]
+    assert status["available_phases"] == []
+    approved = harness.respond(
+        "task", "approve", approval_token=pending["prompt"]["approval_token"]
+    )
+    assert approved["stage"] == "specification_ready"
+    assert approved["outcome"]["title"] == "Specification approved"
+    before = copy.deepcopy(harness._state("task"))
+    harness.task_chat("task", "I have no option to continue")
+    status = agent.calls[-1][1]["workflow_status"]
+    assert status["specification_status"] == "approved"
+    assert "approve" not in status["actions"]
+    assert status["available_phases"] == approved["prompt"]["available_phases"]
+    assert {"tests", "implement"} <= set(status["available_phases"])
+    assert harness._state("task") == before
+    assert not executor.calls
