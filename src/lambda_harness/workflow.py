@@ -1370,7 +1370,15 @@ class Harness(CheckRunner):
             )
         if not self._ensure_validation_knowledge(state, "tests"):
             return
-        proposal = self._ask(state, "test_author")
+        # Reaching this node means the feature specification was approved, or the
+        # developer supplied a standalone test scope. Draft prose is not a gate.
+        proposal = self._ask(
+            state,
+            "test_author",
+            specification_status=(
+                "developer_supplied" if state.get("task_kind") == "tests" else "approved"
+            ),
+        )
         if not proposal["changes"]:
             state["messages"].append({"role": "test_author", "answer": proposal["summary"]})
             self._gate(
@@ -1412,7 +1420,7 @@ class Harness(CheckRunner):
             state, "implement" if role == "implementer" else "refactor"
         ):
             return
-        proposal = self._ask(state, role)
+        proposal = self._ask(state, role, specification_status="approved")
         state["role"] = role
         self._accept_code(state, proposal)
 

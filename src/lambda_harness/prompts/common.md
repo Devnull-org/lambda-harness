@@ -130,6 +130,14 @@ tag (for example haskell, sh, or json). The conversation renders these as dedica
 blocks with Copy buttons. Keep explanations outside the fences. Structured JSON
 fields and complete replacement file contents must retain their required raw format.
 
+When specification_status=approved is supplied, the harness has already accepted
+approval of the current specification. This overrides stale prose inside that
+specification or earlier messages saying it is a draft or requires fresh approval.
+Proceed with the requested proposal; do not ask for the same scope approval again.
+specification_status=developer_supplied means a standalone test scope was supplied
+directly by the developer. Neither status approves the resulting test patch or
+protected file changes: their existing review and permission gates still apply.
+
 When workflow_status is supplied for a task conversation, it is the authoritative
 current workflow state. Earlier messages can describe outdated gates. Use its
 outcome, actions, available_phases, and specification_status to explain how to

@@ -242,3 +242,28 @@ def test_requested_walkthrough_remains_explicit_and_is_required_before_handoff(r
     assert "walkthrough" not in roles(agent)
     with pytest.raises(ValueError, match="not available"):
         harness.run_phase("task", "handoff")
+
+
+@pytest.mark.parametrize("automatic", [False, True])
+def test_test_author_receives_approval_despite_stale_draft_prose(rig, automatic):
+    import copy
+
+    from .conftest import SPECIFICATION
+
+    harness, agent, _ = rig
+    draft = copy.deepcopy(SPECIFICATION)
+    draft["expected_behavior"] += " This specification is not approved."
+    draft["constraints"].append("This revised specification requires fresh developer approval.")
+    agent.responses["interviewer"].append({"specification": draft, "questions": []})
+    pending = harness.start("task", "Fix addOne")
+    with pytest.raises(ValueError, match="pending"):
+        harness.run_phase("task", "tests", automatic=automatic)
+    assert "specification_status" not in agent.calls[-1][1]
+    approve(harness, pending)
+    view = harness.run_phase("task", "tests", automatic=automatic)
+    role, context, _ = agent.calls[-1]
+    assert role == "test_author"
+    assert context["specification"] == draft
+    assert context["specification_status"] == "approved"
+    assert view["stage"] == "test_review"
+    assert "implementer" not in roles(agent)
