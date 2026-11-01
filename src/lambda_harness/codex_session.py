@@ -8,6 +8,7 @@ import subprocess
 import tempfile
 import time
 
+from .failures import provider_message
 from .process import ProcessError
 
 APPROVALS = {
@@ -16,18 +17,20 @@ APPROVALS = {
 }
 
 
-def run_session(
-    argv, cwd, *, prompt, schema, model, env, timeout, cancel, approve, progress=None, effort=None
-):
-    """Return the final structured reply and provider model; never auto-grant permissions."""
-    if cancel is not None and cancel.is_set():
-        raise ProcessError("Model request stopped", kind="cancelled")
+def strict_schema(schema):
+    """Close object schemas without discarding dynamic-map value constraints."""
     schema = json.loads(json.dumps(schema))
 
     def strict(value):
         if isinstance(value, dict):
-            if "properties" in value:
+            if value.get("type") == "object" or "properties" in value:
+                if value.get("additionalProperties") not in (None, False):
+                    raise ValueError(
+                        "Response schema contains an open-ended object; enumerate its keys"
+                    )
+                value.setdefault("properties", {})
                 value["required"] = list(value["properties"])
+                value["additionalProperties"] = False
             for child in value.values():
                 strict(child)
         elif isinstance(value, list):
@@ -35,6 +38,16 @@ def run_session(
                 strict(child)
 
     strict(schema)
+    return schema
+
+
+def run_session(
+    argv, cwd, *, prompt, schema, model, env, timeout, cancel, approve, progress=None, effort=None
+):
+    """Return the final structured reply and provider model; never auto-grant permissions."""
+    if cancel is not None and cancel.is_set():
+        raise ProcessError("Model request stopped", kind="cancelled")
+    schema = strict_schema(schema)
     with tempfile.TemporaryFile() as errors:
         try:
             process = subprocess.Popen(
@@ -158,7 +171,7 @@ def run_session(
                         continue
                     if "id" in event:
                         if event.get("error"):
-                            raise ProcessError(str(event["error"]), kind="provider")
+                            raise ProcessError(provider_message(event["error"]), kind="provider")
                         result = event.get("result", {})
                         if event["id"] == "initialize":
                             send({"method": "initialized", "params": {}})
@@ -201,7 +214,7 @@ def run_session(
                     if params.get("threadId") != thread_id:
                         continue
                     if method == "error":
-                        last_error = params.get("error", {}).get("message", "Provider error")
+                        last_error = provider_message(params.get("error") or "Provider error")
                         if progress:
                             suffix = "; retrying" if params.get("willRetry") else ""
                             progress("Codex: " + last_error + suffix)
@@ -226,7 +239,9 @@ def run_session(
                         turn = params["turn"]
                         if turn.get("status") != "completed":
                             raise ProcessError(
-                                str(turn.get("error") or "Codex turn interrupted"),
+                                provider_message(
+                                    turn.get("error") or last_error or "Codex turn interrupted"
+                                ),
                                 kind="cancelled"
                                 if turn.get("status") == "interrupted"
                                 else "provider",

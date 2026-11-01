@@ -1,5 +1,6 @@
 """Classify backend failures without treating them as model replies."""
 
+import json
 import re
 
 
@@ -75,6 +76,27 @@ def failure_kind(text):
     return "provider"
 
 
+def provider_message(value):
+    """Extract readable provider errors, including JSON nested in RPC messages."""
+    for _ in range(8):
+        if isinstance(value, dict):
+            nested = value.get("message") or value.get("error")
+            if nested is None:
+                break
+            value = nested
+        elif isinstance(value, str):
+            try:
+                parsed = json.loads(value)
+            except (ValueError, TypeError):
+                break
+            if not isinstance(parsed, (dict, str)):
+                break
+            value = parsed
+        else:
+            break
+    return str(value)[:2000]
+
+
 class BackendError(RuntimeError):
     """Carry a provider failure and its raw diagnostics to the workflow."""
 
@@ -90,6 +112,7 @@ class BackendError(RuntimeError):
             "guidance": GUIDANCE[self.kind],
             "backend_failure": {"backend": self.backend, "kind": self.kind},
             "diagnostics": self.diagnostics,
+            "provider_message": provider_message(str(self)),
         }
 
 

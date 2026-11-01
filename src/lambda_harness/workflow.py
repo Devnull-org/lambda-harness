@@ -833,6 +833,8 @@ class Harness(CheckRunner):
         elif stage in errors:
             kind, title = "error", "Stopped: action needed"
             detail = prompt.get("error") or prompt.get("summary") or "The last step failed."
+            if prompt.get("provider_message"):
+                detail += "\n" + prompt["provider_message"]
             if stage == "validation_blocked":
                 validation = state.get("validation", {})
                 failed = [

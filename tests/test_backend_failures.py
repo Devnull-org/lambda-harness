@@ -242,3 +242,18 @@ def test_a_failed_agent_cannot_change_files_and_then_get_an_automatic_correction
     view = harness.respond("changed", "retry")
     assert view["stage"] == "specification_review"
     assert len(agent.calls) == 1
+
+
+def test_provider_schema_failure_is_visible_in_task_status(rig):
+    harness, _, _ = rig
+    reason = "Invalid schema: coverage.properties is required"
+
+    def fail(*args):
+        raise BackendError(reason, backend="codex")
+
+    harness.agent = fail
+    view = harness.start("schema-error", "Fix increment")
+    assert view["stage"] == "backend_blocked"
+    assert view["prompt"]["provider_message"] == reason
+    assert reason in view["outcome"]["detail"]
+    assert "retry" in view["prompt"]["actions"]

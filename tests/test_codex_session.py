@@ -260,3 +260,66 @@ def test_native_mid_turn_model_reroute_is_rejected(tmp_path):
             cancel=None,
             approve=lambda *_: False,
         )
+
+
+@pytest.mark.parametrize("kind", ["feature", "tests"])
+def test_test_author_coverage_is_a_closed_provider_schema_with_all_criteria(kind):
+    from lambda_harness.backends import prompt_for
+    from lambda_harness.codex_session import strict_schema
+    from lambda_harness.schemas import validate_response
+
+    context = {
+        "task_kind": kind,
+        "specification": {
+            "acceptance_criteria": [{"id": "AC-1"}, {"id": "AC-2"}],
+        },
+    }
+    _, original = prompt_for("test_author", context)
+    schema = strict_schema(original)
+    coverage = schema["properties"]["coverage"]
+    full = coverage["anyOf"][0] if kind == "feature" else coverage
+    assert set(full["properties"]) == {"AC-1", "AC-2"}
+    assert set(full["required"]) == {"AC-1", "AC-2"}
+    assert full["additionalProperties"] is False
+    assert full["properties"]["AC-1"] == {"type": "array", "items": {"type": "string"}}
+    if kind == "feature":
+        assert coverage["anyOf"][1]["properties"] == {}
+        decision = {
+            "summary": "Scope needs a decision",
+            "changes": [],
+            "expected_failures": [],
+            "coverage": {},
+            "commit_message": "No patch",
+        }
+        assert validate_response("test_author", context, decision)["coverage"] == {}
+
+
+def test_strict_schema_does_not_silently_discard_map_values():
+    from lambda_harness.codex_session import strict_schema
+
+    with pytest.raises(ValueError, match="open-ended object"):
+        strict_schema({"type": "object", "additionalProperties": {"type": "string"}})
+
+
+def test_native_schema_error_is_readable_and_keeps_provider_reason(tmp_path):
+    from pathlib import Path
+
+    script = session_script(tmp_path)
+    path = Path(script)
+    reason = "Invalid schema: coverage.properties is required"
+    error = {"message": json.dumps({"error": {"message": reason}, "status": 400})}
+    path.write_text(
+        path.read_text().replace("'status':'completed'", "'status':'failed','error':" + repr(error))
+    )
+    with pytest.raises(ProcessError, match=reason):
+        run_session(
+            [script],
+            tmp_path,
+            prompt="Write tests",
+            schema={"type": "object"},
+            model=None,
+            env=os.environ.copy(),
+            timeout=5,
+            cancel=None,
+            approve=lambda *_: False,
+        )

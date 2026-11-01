@@ -328,6 +328,38 @@ def schema_for(role, context):
     return SCHEMAS[role]
 
 
+def response_schema(role, context):
+    """Use known criterion IDs instead of an open map in provider output schemas."""
+    model = schema_for(role, context)
+    schema = model.model_json_schema()
+    if issubclass(model, Tests):
+        criteria = (context.get("specification") or {}).get("acceptance_criteria", [])
+        properties = {
+            criterion["id"]: {"type": "array", "items": {"type": "string"}}
+            for criterion in criteria
+        }
+        coverage = {
+            "type": "object",
+            "properties": properties,
+            "required": list(properties),
+            "additionalProperties": False,
+        }
+        if model is FeatureTests and properties:
+            coverage = {
+                "anyOf": [
+                    coverage,
+                    {
+                        "type": "object",
+                        "properties": {},
+                        "required": [],
+                        "additionalProperties": False,
+                    },
+                ]
+            }
+        schema["properties"]["coverage"] = coverage
+    return schema
+
+
 def validate_response(role, context, value, *, notify=None):
     """Discard only empty unexpected fields; keep all other validation strict."""
     schema = schema_for(role, context)

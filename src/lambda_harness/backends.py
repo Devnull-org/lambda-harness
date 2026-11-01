@@ -15,7 +15,7 @@ from pydantic import Field, field_validator
 from .failures import AgentInterrupted, BackendError, BackendResponseError, failure_kind
 from .model_catalog import valid_effort
 from .process import ProcessError, run_process
-from .schemas import Record, schema_for, validate_response
+from .schemas import Record, response_schema, schema_for, validate_response
 
 
 def decode_response(text):
@@ -91,7 +91,7 @@ class Backend(Record):
 
 
 def prompt_for(role, context):
-    schema = schema_for(role, context).model_json_schema()
+    schema = response_schema(role, context)
     profile = context.get("agent_profile")
     prompt_role = "code_reviewer" if profile and role == "haskell_reviewer" else role
     specialist = (
