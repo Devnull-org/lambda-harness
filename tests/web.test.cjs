@@ -4279,15 +4279,18 @@ for (const reducedMotion of [false, true]) {
   });
 }
 
-test("continuation controls follow the conversation and expose approved specification next steps", async () => {
+test("continuation controls follow the chat input and expose approved specification next steps", async () => {
   const html = readFileSync("src/lambda_harness/web/index.html", "utf8");
   assert(html.indexOf('id="history"') < html.indexOf('id="task-outcome"'));
   assert(
     html.indexOf('id="task-outcome"') < html.indexOf('id="task-controls"'),
   );
   assert(
-    html.indexOf('id="task-controls"') <
-      html.indexOf('id="reply-model-picker"'),
+    html.indexOf('id="reply-model-picker"') < html.indexOf('id="composer"'),
+  );
+  assert(html.indexOf('id="send"') < html.indexOf('id="task-outcome"'));
+  assert(
+    html.indexOf('id="task-controls"') < html.indexOf('id="activity-log"'),
   );
   assert.equal(html.match(/id="task-controls"/g).length, 1);
   const current = snapshot({
