@@ -1,6 +1,6 @@
 "use strict";
 const $ = (id) => document.getElementById(id);
-const token = document.querySelector('meta[name="harness-token"]').content;
+let token = document.querySelector('meta[name="harness-token"]').content;
 let permissionSound = true,
   permissionAudio = null,
   pendingBell = false;
@@ -317,7 +317,38 @@ async function guard(action) {
     if (scope === taskScope()) error(e.message);
   }
 }
-async function api(path, body) {
+let renewingSession = null;
+async function renewSession(expiredToken) {
+  if (token !== expiredToken) return;
+  if (!renewingSession) {
+    renewingSession = (async () => {
+      const controller = new AbortController();
+      const deadline = setTimeout(() => controller.abort(), 10000);
+      try {
+        const page = await fetch("/", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        if (!page.ok) throw new Error("Unable to reconnect to the harness.");
+        const html = await page.text();
+        const refreshed = html.match(
+          /<meta name="harness-token" content="([^"<>]+)"/,
+        );
+        if (!refreshed)
+          throw new Error("Unable to renew the harness connection.");
+        token = refreshed[1];
+      } finally {
+        clearTimeout(deadline);
+      }
+    })();
+  }
+  try {
+    await renewingSession;
+  } finally {
+    renewingSession = null;
+  }
+}
+async function api(path, body, renewed = false) {
   const controller = new AbortController();
   const deadline = setTimeout(
     () => controller.abort(),
@@ -337,6 +368,16 @@ async function api(path, body) {
   try {
     const response = await fetch(path, options);
     const data = await response.json();
+    if (
+      response.status === 403 &&
+      data.error === "Reload the harness page to connect" &&
+      !renewed
+    ) {
+      // This explicit rejection happens before dispatch; replay is safe even for a POST.
+      // Network failures and other errors never retry a mutation automatically.
+      await renewSession(options.headers["X-Harness-Token"]);
+      return api(path, body, true);
+    }
     if (!response.ok) throw new Error(data.error || "Request failed");
     return data;
   } catch (e) {
@@ -1128,7 +1169,8 @@ async function refresh() {
     if (requestId !== refreshId || taskId !== selected) return;
     connectionError = e.message;
     error("Unable to refresh: " + e.message + " Retrying automatically…");
-    if (state?.task?.task_id === selected) renderHistory(state.task);
+    if (state) render();
+    else $("error").append(button("Reconnect", refresh, "primary"));
   } finally {
     if (requestId === refreshId && taskId === selected)
       timer = setTimeout(
@@ -1240,7 +1282,7 @@ function render() {
           : "■ Stop model";
   if (currentJob()) {
     const job = currentJob();
-    $("log").textContent = job.log.join("\n");
+    $("log").textContent = (job.log || []).join("\n");
     if (!running && !seenJob.has(job.id)) {
       seenJob.add(job.id);
       if (job.result?.stage === "agent_ready") guard(loadAgents);
@@ -1874,7 +1916,7 @@ function renderTask(task, running) {
             : currentJob()?.permission
               ? "Permission requested"
               : "Working…",
-          detail: currentJob().log.at(-1) || "Starting the selected action…",
+          detail: currentJob().log?.at(-1) || "Starting the selected action…",
         }
       : operationError
         ? {
@@ -1908,6 +1950,8 @@ function renderTask(task, running) {
     );
     const controls = el("div", undefined, "button-row");
     const continuation = taskContinuation(task);
+    if (connectionError)
+      controls.append(button("Reconnect", refresh, "primary"));
     if (!working && !connectionError && continuation) {
       const next = button(
         continuation.label,

@@ -3560,6 +3560,7 @@ test("native permission bells announce background jobs once without leaking thei
   current.stopping = true;
   await ui.run("refresh()");
   assert(runtimeControls(ui).every((n) => n.disabled));
+  assert.equal(ui.run("connectionError"), null);
 });
 
 for (const mobile of [false, true]) {
@@ -4430,5 +4431,98 @@ test("compact continuation keeps approval explicit and selects the next availabl
       'taskContinuation({task_id:"example", prompt:{actions:["answer"]}})',
     ),
     null,
+  );
+});
+
+test("expired session reconnects without reloading or losing the task draft", async () => {
+  const current = snapshot();
+  const ui = await app({ fetcher: async () => response(current) });
+  ui.elements.get("message").value = "Keep these instructions";
+  const seen = [];
+  ui.fetch(async (path, options) => {
+    seen.push([path, options.headers?.["X-Harness-Token"]]);
+    if (path === "/")
+      return {
+        ok: true,
+        text: async () => '<meta name="harness-token" content="new-token" />',
+      };
+    if (options.headers["X-Harness-Token"] === "test-token")
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "Reload the harness page to connect" }),
+      };
+    return response(current);
+  });
+  await ui.run("refresh()");
+  assert.equal(ui.run("connectionError"), null);
+  assert.equal(ui.elements.get("message").value, "Keep these instructions");
+  assert.equal(ui.pageLoads.length, 0);
+  assert.equal(seen.filter(([path]) => path === "/").length, 1);
+  assert.equal(seen.at(-1)[1], "new-token");
+});
+
+test("only an explicit expired-token rejection retries a command", async () => {
+  const ui = await app();
+  let attempts = 0,
+    accepted = 0;
+  ui.fetch(async (path, options) => {
+    if (path === "/")
+      return {
+        ok: true,
+        text: async () => '<meta name="harness-token" content="fresh-token" />',
+      };
+    attempts++;
+    if (options.headers["X-Harness-Token"] === "test-token")
+      return {
+        ok: false,
+        status: 403,
+        json: async () => ({ error: "Reload the harness page to connect" }),
+      };
+    accepted++;
+    return response({ accepted: true });
+  });
+  await ui.run(
+    'api("/api/command", {command:"respond",task_id:"example",action:"retry"})',
+  );
+  assert.equal(attempts, 2);
+  assert.equal(accepted, 1);
+  attempts = 0;
+  ui.fetch(async () => {
+    attempts++;
+    throw new Error("Network lost");
+  });
+  await assert.rejects(
+    ui.run('api("/api/command", {command:"respond"})'),
+    /Network lost/,
+  );
+  assert.equal(attempts, 1);
+});
+
+test("connection failure offers reconnect and restores controls after recovery", async () => {
+  const current = snapshot({
+    ...task(),
+    prompt: { actions: ["retry", "question"] },
+  });
+  const ui = await app({ fetcher: async () => response(current) });
+  ui.fetch(async () => {
+    throw new Error("Offline");
+  });
+  await ui.run("refresh()");
+  const status = ui.elements.get("task-outcome");
+  assert.equal(status.children[0].textContent, "Connection lost");
+  const controls = status.children[1];
+  assert.equal(controls.children[0].textContent, "Reconnect");
+  assert.ok(!controls.children[0].disabled);
+  assert.equal(
+    descendants(status, "button").some((b) => b.textContent === "Continue"),
+    false,
+  );
+  ui.fetch(async () => response(current));
+  await controls.children[0].onclick();
+  assert.equal(ui.run("connectionError"), null);
+  assert.equal(
+    descendants(status, "button").some((b) => b.textContent === "Continue"),
+    true,
   );
 });
