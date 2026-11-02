@@ -67,6 +67,11 @@ class Interview(Record):
 
 
 class Exploration(Record):
+    next_action: Literal["start_implementation"] | None = Field(
+        default=None,
+        description="Start the coding workflow only when the latest developer message "
+        "explicitly asks to implement or continue coding. Null for research and questions.",
+    )
     summary: str = Field(min_length=1, description="A direct answer to the research question.")
     analysis: str = Field(
         min_length=1,

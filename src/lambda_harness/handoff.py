@@ -28,7 +28,7 @@ GATES = {
     "interview": {"answer"},
     "specification_review": {"approve", "question", "revise"},
     "chat": {"answer"},
-    "exploration": {"question", "done"},
+    "exploration": {"question", "start_implementation", "done"},
     "standalone_review": {"question", "revise", "done"},
     "test_review": {"approve", "question", "revise", "recheck"},
     "test_scope_review": {"question", "revise", "choose_phase"},
@@ -90,6 +90,7 @@ LOCAL_FIELDS = {
     "handoff_resume",
 }
 STATE_FIELDS = {
+    "implementation_handoff",
     "check_plan",
     "check_results",
     "check_history",
@@ -141,6 +142,7 @@ STATE_FIELDS = {
     "agent_integrity_fingerprint",
     "test_paths",
     "expected_failures",
+    "test_missing_implementation",
     "proposal",
     "role",
     "phase",
@@ -244,6 +246,7 @@ def _validate_state(state):
         if type(state.get(name)) is not int or not 0 <= state[name] <= 1_000_000:
             raise ValueError(f"Invalid workflow count: {name}")
     for name in (
+        "implementation_handoff",
         "agent_profiles",
         "validation_knowledge",
         "specification",
@@ -261,7 +264,7 @@ def _validate_state(state):
     ):
         if name in state and not isinstance(state[name], dict):
             raise ValueError(f"Invalid workflow record: {name}")
-    for name in ("test_paths", "expected_failures"):
+    for name in ("test_paths", "expected_failures", "test_missing_implementation"):
         if name in state and (
             not isinstance(state[name], list)
             or not all(isinstance(value, str) for value in state[name])

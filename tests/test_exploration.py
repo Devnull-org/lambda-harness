@@ -36,7 +36,7 @@ def test_exploration_delivers_analysis_and_saves_it_without_interview_or_code(ri
     view = research(harness, agent)
     assert view["stage"] == "exploration"
     assert view["prompt"]["exploration"]["analysis"] == ANALYSIS["analysis"]
-    assert set(view["prompt"]["actions"]) == {"question", "done"}
+    assert set(view["prompt"]["actions"]) == {"question", "start_implementation", "done"}
     assert "specification" not in view["prompt"]
     assert [call[0] for call in agent.calls] == ["explorer"]
     assert not executor.calls
@@ -50,7 +50,7 @@ def test_exploration_delivers_analysis_and_saves_it_without_interview_or_code(ri
         harness.respond("research", "approve", approval_token=view["prompt"]["approval_token"])
     completed = harness.respond("research", "done")
     assert completed["stage"] == "exploration_ready"
-    assert completed["prompt"]["available_phases"] == ["explore", "interview"]
+    assert completed["prompt"]["available_phases"] == ["explore", "interview", "implement"]
     assert harness.resume("research") == completed
     assert len(agent.calls) == 1
     with pytest.raises(ValueError, match="not available"):
@@ -199,3 +199,97 @@ def test_explorer_direct_edits_are_rejected_before_saving_analysis(rig, reposito
     assert not (Path(view["report_directory"]) / "exploration.md").exists()
     assert (repository / SOURCE).read_text() == original
     assert not executor.calls
+
+
+def test_continue_coding_in_conversation_runs_test_first_flow_after_approvals(rig):
+    harness, agent, executor = rig
+    original = research(harness, agent)
+    agent.responses["explorer"].append({**ANALYSIS, "next_action": "start_implementation"})
+    view = harness.respond(
+        "research", "question", text="Implement the pure policy now", automatic=True
+    )
+    assert view["stage"] == "specification_review"
+    assert view["outcome"]["title"] == "Approve scope to start coding"
+    assert view["worktree"] == original["worktree"]
+    context = agent.calls[-1][1]
+    assert context["intent"] == "implementation_interview"
+    handoff = context["implementation_handoff"]
+    assert handoff["instruction"] == "Implement the pure policy now"
+    assert handoff["exploration"]["analysis"] == ANALYSIS["analysis"]
+    assert any(m.get("text") == handoff["instruction"] for m in handoff["messages"])
+    assert not executor.calls
+    tests = harness.respond("research", "approve", approval_token=view["prompt"]["approval_token"])
+    assert tests["stage"] == "test_review"
+    assert "implementer" not in [role for role, _, _ in agent.calls]
+    assert agent.calls[-1][1]["implementation_handoff"] == handoff
+    complete = harness.respond(
+        "research", "approve", approval_token=tests["prompt"]["approval_token"]
+    )
+    assert complete["stage"] == "ready"
+    assert "implementer" in [role for role, _, _ in agent.calls]
+    assert complete["worktree"] == original["worktree"]
+
+
+def test_legacy_exploration_offers_start_implementation_with_stale_token_guard(rig):
+    harness, agent, executor = rig
+    view = research(harness, agent)
+    state = copy.deepcopy(harness._state("research"))
+    state["prompt"]["actions"] = ["question", "done"]
+    harness.graph.update_state(harness._config("research"), state)
+    assert "start_implementation" in harness.inspect("research")["prompt"]["actions"]
+    with pytest.raises(ValueError, match="Stale"):
+        harness.respond("research", "start_implementation", approval_token="old")
+    view = harness.respond(
+        "research", "start_implementation", approval_token=view["prompt"]["approval_token"]
+    )
+    assert view["stage"] == "specification_review"
+    assert agent.calls[-1][1]["implementation_handoff"]["exploration"]["analysis"]
+    assert not executor.calls
+
+
+@pytest.mark.parametrize("via_chat", [False, True])
+def test_completed_exploration_can_start_implementation_without_restart(rig, via_chat):
+    harness, agent, _ = rig
+    original = research(harness, agent)
+    harness.respond("research", "done")
+    if via_chat:
+        agent.responses["explorer"].append({**ANALYSIS, "next_action": "start_implementation"})
+        view = harness.task_chat("research", "Continue coding this yourself")
+    else:
+        view = harness.run_phase("research", "implement")
+    assert view["stage"] == "specification_review"
+    assert view["worktree"] == original["worktree"]
+    assert agent.calls[-1][1]["implementation_handoff"]
+
+
+def test_initial_research_cannot_start_coding_from_model_suggestion(rig):
+    harness, agent, executor = rig
+    agent.responses["explorer"].append({**ANALYSIS, "next_action": "start_implementation"})
+    view = harness.start("research", "Explore only", phase="explore")
+    assert view["stage"] == "exploration"
+    assert agent.calls[-1][1]["can_start_implementation"] is False
+    assert not executor.calls
+
+
+def test_completed_exploration_question_stays_research(rig):
+    harness, agent, executor = rig
+    research(harness, agent)
+    harness.respond("research", "done")
+    agent.responses["explorer"].append({**ANALYSIS, "next_action": None})
+    view = harness.task_chat("research", "What would implementing the alternative involve?")
+    assert view["stage"] == "exploration"
+    assert agent.calls[-1][0] == "explorer"
+    assert "implementation_handoff" not in harness._state("research")
+    assert not executor.calls
+
+
+def test_reexploring_does_not_reuse_an_old_coding_request(rig):
+    harness, agent, _ = rig
+    research(harness, agent)
+    agent.responses["explorer"].append({**ANALYSIS, "next_action": "start_implementation"})
+    view = harness.respond("research", "question", text="Please implement the pure policy")
+    harness.respond("research", "approve", approval_token=view["prompt"]["approval_token"])
+    agent.responses["explorer"].append({**ANALYSIS, "next_action": "start_implementation"})
+    view = harness.run_phase("research", "explore")
+    assert view["stage"] == "exploration"
+    assert agent.calls[-1][1]["can_start_implementation"] is False

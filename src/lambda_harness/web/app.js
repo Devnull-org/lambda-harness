@@ -248,6 +248,7 @@ let reviewFromPR = false,
   prBase = "",
   baseInitialized = false;
 const labels = {
+  start_implementation: "Start implementation",
   approve_changes: "Approve changes and continue",
   deny_changes: "Deny and revise",
   revise_changes: "Request changes",
@@ -1807,6 +1808,22 @@ function focusTaskInstructions(task) {
 }
 function taskContinuation(task) {
   const actions = task.prompt?.actions || [];
+  if (
+    actions.includes("start_implementation") ||
+    (task.stage === "exploration_ready" &&
+      task.prompt?.available_phases?.includes("implement"))
+  )
+    return {
+      label: "Start implementation",
+      body: actions.includes("start_implementation")
+        ? {
+            command: "respond",
+            task_id: task.task_id,
+            action: "start_implementation",
+            token: task.prompt.approval_token,
+          }
+        : { command: "run", task_id: task.task_id, phase: "implement" },
+    };
   for (const action of [
     "revise_tests",
     "repair",

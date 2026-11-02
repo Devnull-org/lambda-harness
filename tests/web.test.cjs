@@ -4434,6 +4434,41 @@ test("compact continuation keeps approval explicit and selects the next availabl
   );
 });
 
+test("exploration starts implementation from the compact status using the selected task", async () => {
+  const current = snapshot({
+    ...task(),
+    mode: "full",
+    prompt: {
+      actions: ["question", "start_implementation", "done"],
+      approval_token: "research-token",
+    },
+  });
+  const commands = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (url === "/api/command") commands.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  const start = descendants(ui.elements.get("task-outcome"), "button").find(
+    (b) => b.textContent === "Start implementation",
+  );
+  assert.ok(start);
+  await start.onclick();
+  assert.equal(commands.length, 1);
+  assert.equal(commands[0].command, "respond");
+  assert.equal(commands[0].action, "start_implementation");
+  assert.equal(commands[0].task_id, "example");
+  assert.equal(commands[0].token, "research-token");
+  assert.equal(commands[0].automatic, true);
+  const completed = ui.run(
+    'taskContinuation({task_id:"example", stage:"exploration_ready", prompt:{actions:[], available_phases:["explore", "interview", "implement"]}})',
+  );
+  assert.equal(completed.label, "Start implementation");
+  assert.equal(completed.body.command, "run");
+  assert.equal(completed.body.phase, "implement");
+});
+
 test("expired session reconnects without reloading or losing the task draft", async () => {
   const current = snapshot();
   const ui = await app({ fetcher: async () => response(current) });

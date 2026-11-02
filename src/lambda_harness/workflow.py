@@ -442,6 +442,10 @@ class Harness(CheckRunner):
                     "and files, or start a new task for the changed checkout"
                 )
             state["mode"] = "full" if automatic else "phased"
+            if state["stage"] == "exploration_ready" and phase == "implement":
+                self._begin_implementation(state)
+                self.graph.invoke(state, config)
+                return self._view(self._state(task_id))
             state["selected_phase"] = phase
             if phase == "interview":
                 state.pop("specification", None)
@@ -478,11 +482,18 @@ class Harness(CheckRunner):
             return self._view(self._state(task_id))
 
     def task_chat(self, task_id, text):
-        """Discuss a task without advancing or rewriting its pending checkpoint."""
+        """Discuss a task; exploration messages can explicitly request a coding handoff."""
         if not text.strip():
             raise ValueError("Enter a question about this task")
         with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
+            if state["stage"] == "exploration_ready":
+                if self._workspace(state).fingerprint() != state["phase_fingerprint"]:
+                    raise ValueError("Worktree changed since exploration; restore it first")
+                state["messages"].append({"stage": "exploration", "text": text})
+                state["next"] = "explore"
+                self.graph.invoke(state, self._config(task_id))
+                return self._view(self._state(task_id))
             if state.get("task_kind") == "agent_builder":
                 raise ValueError("Use the agent design conversation for this task")
             role = (
@@ -580,6 +591,7 @@ class Harness(CheckRunner):
                 "accept_red",
                 "save_agent",
                 "continue_handoff",
+                "start_implementation",
                 "continue_implementation",
                 "approve_changes",
                 "revise_changes",
@@ -724,6 +736,8 @@ class Harness(CheckRunner):
         if state.get("agent_origin"):
             view["agent_id"] = state["agent_origin"]["id"]
         view["can_task_chat"] = state.get("task_kind") not in {"agent_builder", "chat"}
+        if state["stage"] == "exploration":
+            view["prompt"] = {**view["prompt"], "actions": recovery_actions(state)}
         if view.get("prompt", {}).get("summary") == (
             "Fix selected. Start the indicated phase to address it."
         ):
@@ -741,7 +755,7 @@ class Harness(CheckRunner):
                 if commits
                 else state.get("starting_revision", state["base"])
             )
-        if state["stage"] == "specification_ready":
+        if state["stage"] in {"specification_ready", "exploration_ready"}:
             view["prompt"] = {**view["prompt"], "available_phases": self._available_phases(state)}
         if state["stage"] == "test_change_review":
             proposal = state["proposed_test_change"]
@@ -874,6 +888,14 @@ class Harness(CheckRunner):
             guidance = (
                 "Review the tests and compiler diagnostics, then approve to start implementation."
             )
+        elif stage in {"exploration", "exploration_ready"}:
+            kind, title = "waiting", "Research ready"
+            detail = "Ask the agent to implement the discussed change, or continue researching."
+            guidance = "Start implementation carries this conversation into the coding workflow."
+        elif stage == "specification_review" and state.get("implementation_handoff"):
+            kind, title = "waiting", "Approve scope to start coding"
+            detail = "The agent prepared the implementation scope from your research."
+            guidance = "Approve & continue starts the test-first workflow in automatic mode."
         elif stage == "specification_ready":
             kind, title = "success", "Specification approved"
             detail = "Requirements are approved. No further specification approval is needed."
@@ -942,7 +964,7 @@ class Harness(CheckRunner):
             return []
         following = {
             "specification_ready": ["explore", "interview", "tests", "implement", "refactor"],
-            "exploration_ready": ["explore", "interview"],
+            "exploration_ready": ["explore", "interview", "implement"],
             "tests_requested": ["tests"],
             "tests_ready": ["implement"],
             "implementation_ready": ["refactor"],
@@ -1117,6 +1139,8 @@ class Harness(CheckRunner):
             context["validation"] = state["validation"]
         if role == "explorer" and state.get("exploration"):
             context["exploration"] = state["exploration"]
+        if role in {"interviewer", *CODING_ROLES} and state.get("implementation_handoff"):
+            context["implementation_handoff"] = state["implementation_handoff"]
         return {**context, **extra}
 
     def _ask(self, state, role, **extra):
@@ -1310,18 +1334,48 @@ class Harness(CheckRunner):
         self._gate(state, "chat", {"references": references}, ["answer"])
 
     def _explore(self, state):
-        result = self._ask(state, "explorer", intent="explore")
+        messages = messages_for_agent(state, "explorer")
+        latest = messages[-1].get("text") if messages else None
+        result = self._ask(
+            state,
+            "explorer",
+            intent="explore",
+            latest_user_message=latest,
+            can_start_implementation=bool(latest),
+        )
         state["exploration"] = {**result, "revision": self._workspace(state).revision}
         state["messages"].append({"stage": "exploration", "role": "explorer", **result})
         reports = Path(state["report_directory"])
         save_json(reports / "exploration.json", state["exploration"])
         (reports / "exploration.md").write_text(exploration_report(state))
+        if latest and result.get("next_action") == "start_implementation":
+            self._begin_implementation(state, latest)
+            return
         self._gate(
             state,
             "exploration",
             {"exploration": state["exploration"], "report": str(reports / "exploration.md")},
-            ["question", "done"],
+            ["question", "start_implementation", "done"],
         )
+
+    def _begin_implementation(self, state, instruction=None):
+        instruction = instruction or "Implement the change discussed in this exploration."
+        state["implementation_handoff"] = {
+            "instruction": instruction,
+            "exploration": copy.deepcopy(state.get("exploration")),
+            "messages": messages_for_agent(state, "explorer"),
+        }
+        state["messages"].append(
+            {
+                "stage": "interview",
+                "role": "interviewer",
+                "answer": "Starting implementation preparation from this research. "
+                "I will prepare the scope for approval, then the agents will write tests and code.",
+            }
+        )
+        state.pop("specification", None)
+        state["selected_phase"], state["next"] = "interview", "interview"
+        state["prompt"], state["attempts"], state["patch_count"] = {}, 0, 0
 
     def _create_worktree(self, state):
         path = Path(state["directory"]) / "worktree"
@@ -2210,6 +2264,8 @@ class Harness(CheckRunner):
                     {"stage": stage, "action": action, "text": response["text"]}
                 )
                 state["next"] = "standalone_review"
+        elif stage == "exploration" and action == "start_implementation":
+            self._begin_implementation(state, response.get("text"))
         elif stage == "exploration" and action == "done":
             self._phase_complete(
                 state, "exploration_ready", "Exploration saved. Start any further phase explicitly."

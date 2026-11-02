@@ -54,6 +54,8 @@ def commit_failed(state):
 
 def recovery_actions(state):
     actions = list(state.get("prompt", {}).get("actions", []))
+    if state.get("stage") == "exploration":
+        actions.append("start_implementation")
     if can_recover(state):
         actions.append("question")
     if can_recover(state) and saved_coverage_gap(state):

@@ -994,7 +994,7 @@ def test_browser_exploration_can_finish_and_reopen_without_coding(browser_app):
     try:
         task = reopened.state("research")["task"]
         assert task["stage"] == "exploration_ready"
-        assert task["prompt"]["available_phases"] == ["explore", "interview"]
+        assert task["prompt"]["available_phases"] == ["explore", "interview", "implement"]
         assert task["worktree"] == original["worktree"]
         assert any(item.get("text") == "done\nWhy?" for item in task["messages"])
         assert Path(task["prompt"]["report"]).is_file()

@@ -14,6 +14,13 @@ Do not invent answers, silently accept assumptions, or begin implementation plan
 instead of clarifying required behavior. A revised specification needs fresh approval.
 
 If intent=implementation_interview, the developer has explicitly started a new
-requirements interview after exploration. Independently inspect the code and
-ask what, if anything, they want implemented. A research specification or analysis
-does not establish the implementation scope or approve tests or code.
+requirements interview after exploration. When implementation_handoff is present,
+use its instruction, research, and conversation to prepare the implementation scope
+now. The developer already asked the agent to code; do not ask whether they want
+implementation or send them instructions to do it themselves. Inspect the relevant
+code and ask only unresolved behavior questions that materially affect the change.
+Earlier research-only instructions are superseded by this explicit handoff. Keep
+the scope proportional to the chosen change. Return the specification for approval;
+the harness then has the test author and implementer perform the work.
+Without implementation_handoff, independently establish what should be implemented.
+Research alone does not approve a specification, tests, or code.

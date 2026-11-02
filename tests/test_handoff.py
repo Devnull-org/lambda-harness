@@ -487,8 +487,23 @@ def test_completed_exploration_and_full_feature_retain_their_phase_boundaries(ri
     transfer(source, target, ["exploration", "increment"])
     view = accept(target, "exploration")
     assert view["stage"] == "exploration_ready"
-    assert view["prompt"]["available_phases"] == ["explore", "interview"]
+    assert view["prompt"]["available_phases"] == ["explore", "interview", "implement"]
     assert accept(target, "increment")["stage"] == "ready"
+
+
+def test_exploration_coding_context_survives_transfer_without_approval(rig, recipient):
+    source, agent, _ = rig
+    target, _, executor = recipient
+    agent.responses["explorer"].append(ANALYSIS)
+    view = source.start("research", "Explore the options", phase="explore")
+    source.respond(
+        "research", "start_implementation", approval_token=view["prompt"]["approval_token"]
+    )
+    expected = source._state("research")["implementation_handoff"]
+    transfer(source, target, ["research"])
+    assert accept(target, "research")["stage"] == "specification_review"
+    assert target._state("research")["implementation_handoff"] == expected
+    assert not executor.calls
 
 
 def test_reports_reject_traversal_and_symlink_escape(rig, recipient):
