@@ -1768,12 +1768,12 @@ function taskContinuation(task) {
   for (const action of [
     "revise_tests",
     "repair",
-    "retry",
-    "recheck",
     "approve_changes",
     "approve",
     "run_checks",
     "continue_handoff",
+    "retry",
+    "recheck",
     "done",
   ]) {
     if (actions.includes(action))
@@ -1793,6 +1793,17 @@ function taskContinuation(task) {
           token: task.prompt.approval_token,
         },
       };
+  }
+  if (task.stage === "test_scope_review" && actions.includes("revise")) {
+    return {
+      label: "Continue",
+      body: {
+        command: "respond",
+        task_id: task.task_id,
+        action: "revise",
+        text: "Continue with the requested test-first proposal. Missing production APIs are allowed: write the tests against the intended interfaces and declare missing_implementation. Do not wait for production code before proposing tests. Ask only for genuinely unresolved behavior.",
+      },
+    };
   }
   const phases = task.prompt?.available_phases || [];
   const phase = [

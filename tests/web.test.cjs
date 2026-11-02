@@ -4415,7 +4415,7 @@ test("compact status continues incomplete coverage and keeps details collapsed",
 test("compact continuation keeps approval explicit and selects the next available phase", async () => {
   const ui = await app();
   const approval = ui.run(
-    'taskContinuation({task_id:"example", prompt:{actions:["approve"], approval_token:"token"}})',
+    'taskContinuation({task_id:"example", prompt:{actions:["approve", "recheck"], approval_token:"token"}})',
   );
   assert.equal(approval.label, "Approve & continue");
   assert.equal(approval.body.action, "approve");

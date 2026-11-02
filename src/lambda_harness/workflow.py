@@ -864,6 +864,16 @@ class Harness(CheckRunner):
             kind, title = "paused", "Stopped by request"
             detail = prompt.get("summary", "The operation was stopped.")
             guidance = "Choose Retry or send new instructions when you want to continue."
+        elif (
+            stage == "test_review" and state.get("validation", {}).get("status") == "unverified_red"
+        ):
+            kind, title = "waiting", "Tests written · implementation missing"
+            detail = (
+                "The test proposal declares missing production APIs. It has not compiled or run."
+            )
+            guidance = (
+                "Review the tests and compiler diagnostics, then approve to start implementation."
+            )
         elif stage == "specification_ready":
             kind, title = "success", "Specification approved"
             detail = "Requirements are approved. No further specification approval is needed."
@@ -1079,6 +1089,7 @@ class Harness(CheckRunner):
             "revision": workspace.revision,
             "base_revision": state["base"],
             "approved_tests": state.get("approved_tests", {}),
+            "missing_implementation": state.get("test_missing_implementation", []),
             "validation_config": state.get("validation_config", self.validation.model_dump()),
             "validation_knowledge": state.get("validation_knowledge"),
             "patches": [
@@ -1429,6 +1440,7 @@ class Harness(CheckRunner):
         state["test_paths"] = sorted(
             set(state.get("test_paths", [])) | {c["path"] for c in proposal["changes"]}
         )
+        state["test_missing_implementation"] = proposal.get("missing_implementation", [])
         state["expected_failures"], state["coverage"] = (
             proposal["expected_failures"],
             proposal["coverage"],
@@ -1754,7 +1766,9 @@ class Harness(CheckRunner):
         }
         try:
             validation["test_evidence"] = test_evidence(results, allow_cabal=allow_cabal)
-            if state.get("task_kind") == "tests":
+            if state.get("task_kind") == "tests" or (
+                state.get("test_missing_implementation") and state["phase"] == "green"
+            ):
                 covered = {name for names in state["coverage"].values() for name in names}
                 missing = covered - set(validation["test_evidence"]["identities"])
                 if missing:
@@ -1764,6 +1778,21 @@ class Harness(CheckRunner):
                     )
         except ValueError as error:
             validation["evidence_error"] = str(error)
+        if (
+            state.get("task_kind", "feature") == "feature"
+            and state["role"] == "test_author"
+            and state["phase"] == "red"
+            and state["proposal"].get("missing_implementation")
+            and results.get("lint", {}).get("exit_code") == 0
+            and results.get("build", {}).get("exit_code") not in {None, 0}
+        ):
+            # A declared missing API is a reviewable test contract, not executed red evidence.
+            status = validation["status"] = "unverified_red"
+            validation["missing_implementation"] = state["proposal"]["missing_implementation"]
+            validation["evidence_error"] = (
+                "Tests did not compile or execute. Review the compiler diagnostics against "
+                "the declared missing implementation before approving these test contracts."
+            )
         state["validation"] = validation
         state["validations"].append(validation)
         save_json(Path(state["report_directory"]) / "validation.json", state["validations"])

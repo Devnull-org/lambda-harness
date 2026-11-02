@@ -106,6 +106,11 @@ class Tests(Record):
 
 
 class FeatureTests(Tests):
+    missing_implementation: list[str] = Field(
+        default_factory=list,
+        description="Production APIs required by these tests but not implemented yet. "
+        "List concrete modules, symbols, or contracts; [] for assertion-only red tests.",
+    )
     changes: list[Change] = Field(
         description="Test changes, or [] when the scope needs a developer decision."
     )
@@ -119,6 +124,10 @@ class FeatureTests(Tests):
             raise ValueError(
                 "A test patch needs named failures; a scope decision must contain neither"
             )
+        if self.missing_implementation and (
+            not self.changes or any(not item.strip() for item in self.missing_implementation)
+        ):
+            raise ValueError("Missing implementation requires a test patch and concrete API names")
         return self
 
 

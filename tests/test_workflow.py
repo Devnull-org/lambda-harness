@@ -359,3 +359,64 @@ def test_agent_edits_cannot_escape_the_worktree_or_change_git_metadata(rig, path
     view = reach_test_review(harness)
     assert view["stage"] == "agent_error"
     assert "path" in json.dumps(view["prompt"]).lower()
+
+
+@pytest.mark.parametrize("declared,executed", [(False, True), (True, True), (True, False)])
+def test_missing_production_api_can_be_reviewed_before_implementation(rig, declared, executed):
+    from .conftest import FAILURE_ID, command_result, junit
+
+    harness, agent, executor = rig
+    proposal = {
+        "summary": "Specify the new API before implementation",
+        "changes": [{"path": TEST, "content": TEST_CONTENT}],
+        "expected_failures": [FAILURE_ID],
+        "coverage": {"A1": [FAILURE_ID]},
+        "commit_message": "test: specify new API",
+    }
+    if declared:
+        proposal["missing_implementation"] = ["Example.Arithmetic.addOne :: Int -> Int"]
+    agent.responses["test_author"].append(proposal)
+    original_execute = harness.execute
+
+    def missing_api(argv, cwd, **kwargs):
+        if argv[:2] == ["cabal", "build"] and (cwd / SOURCE).read_text() == BROKEN:
+            return command_result(argv, exit_code=1, stderr="Not in scope: addOne")
+        if argv[:2] == ["cabal", "test"] and not executed:
+            return command_result(
+                argv, junit_xml=[junit(failing=False).replace("adds one", "other test")]
+            )
+        return original_execute(argv, cwd, **kwargs)
+
+    harness.execute = missing_api
+    view = reach_test_review(harness)
+    if not declared:
+        assert view["stage"] == "validation_blocked"
+        assert "approve" not in view["prompt"]["actions"]
+        return
+    assert view["stage"] == "test_review"
+    assert view["outcome"]["title"] == "Tests written · implementation missing"
+    validation = view["prompt"]["validation"]
+    assert validation["status"] == "unverified_red"
+    assert validation["test_evidence"]["executed"] == 0
+    assert "did not compile or execute" in validation["evidence_error"]
+    assert validation["commands"]["build"]["stderr_tail"] == "Not in scope: addOne"
+    assert not any(argv[0:2] == ["cabal", "test"] for argv, _, _ in executor.calls)
+    assert not any(role == "implementer" for role, _, _ in agent.calls)
+    with pytest.raises(ValueError, match="Stale|missing"):
+        harness.respond("increment", "approve", approval_token="stale")
+    view = harness.respond("increment", "approve", approval_token=view["prompt"]["approval_token"])
+    if not executed:
+        assert view["stage"] == "validation_blocked"
+        assert "did not execute" in view["prompt"]["validation"]["evidence_error"]
+        assert not any(role == "refactorer" for role, _, _ in agent.calls)
+        return
+    assert view["stage"] == "ready"
+    implementation_context = next(c for r, c, _ in agent.calls if r == "implementer")
+    assert implementation_context["missing_implementation"] == proposal["missing_implementation"]
+    assert implementation_context["validation"]["status"] == "unverified_red"
+    assert all(
+        patch["validation"]["status"] == "green"
+        for patch in harness._state("increment")["commits"]
+        if patch["role"] != "test_author"
+    )
+    assert (Path(view["worktree"]) / TEST).read_text() == TEST_CONTENT

@@ -22,3 +22,10 @@ retained memory; support performance claims with measured evidence when required
 Use the actual validation output to repair failures. Compilation and warnings must
 be clean on every commit. complete=true means the feature should now be test-green.
 Leave broader readability improvements to the separate refactoring agent.
+
+When missing_implementation is supplied, the developer approved test contracts for
+production APIs that do not exist yet. Add those APIs and implement their behavior.
+Keep approved tests unchanged. An unverified_red validation means tests did not
+compile or execute; it is not passing evidence or an observed assertion failure.
+Do not ask the developer to implement these APIs first. Finish only after the full
+build and test validation passes.
