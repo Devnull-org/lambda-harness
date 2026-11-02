@@ -248,6 +248,7 @@ let reviewFromPR = false,
   prBase = "",
   baseInitialized = false;
 const labels = {
+  retry_longer: "Continue with more time",
   approve_baseline: "Use this baseline & continue",
   cancel_baseline: "Keep current baseline",
   start_implementation: "Start implementation",
@@ -1584,6 +1585,34 @@ function baselineCard(task) {
   entry.append(controls);
   return entry;
 }
+function failureCard(task) {
+  if (task.outcome?.kind !== "error" || currentJob()?.running) return null;
+  const timedOut = task.prompt?.backend_failure?.kind === "timeout";
+  const entry = message(
+    "Harness · " + task.outcome.title,
+    timedOut
+      ? "The agent did not return a result before its time limit. The earlier setup report is not an implementation result."
+      : (task.outcome.detail || "The operation stopped.").split("\n")[0],
+  );
+  const controls = el("div", undefined, "button-row");
+  const next = taskContinuation(task);
+  if (next) {
+    const control = button(
+      next.label,
+      () => {
+        if (selected === task.task_id) return command(next.body);
+      },
+      "primary",
+    );
+    control.disabled = submitting || !!connectionError || handoffBusy;
+    controls.append(control);
+  }
+  controls.append(
+    button("Give instructions", () => focusTaskInstructions(task), "quiet"),
+  );
+  entry.append(controls);
+  return entry;
+}
 function scrollToLatestMessage() {
   if (page !== "workspace") return;
   $("history").lastElementChild?.scrollIntoView({ block: "end" });
@@ -1606,6 +1635,7 @@ function renderHistory(task) {
     messages,
     pending,
     task.review_actions,
+    task.outcome?.kind === "error" ? [task.outcome, task.prompt] : null,
     ["test_change_review", "baseline_review"].includes(task.stage)
       ? task.prompt
       : null,
@@ -1777,6 +1807,8 @@ function renderHistory(task) {
   if (permission) history.append(permission);
   const baseline = baselineCard(task);
   if (baseline) history.append(baseline);
+  const failure = failureCard(task);
+  if (failure) history.append(failure);
   if (progress) {
     const entry = el("div", undefined, "message response-progress");
     entry.role = "status";
@@ -1848,6 +1880,15 @@ function focusTaskInstructions(task) {
 }
 function taskContinuation(task) {
   const actions = task.prompt?.actions || [];
+  if (actions.includes("retry_longer"))
+    return {
+      label: `Continue · ${Math.round(task.prompt.retry_timeout_seconds / 60)} min limit`,
+      body: {
+        command: "respond",
+        task_id: task.task_id,
+        action: "retry_longer",
+      },
+    };
   if (actions.includes("approve_baseline"))
     return {
       label: labels.approve_baseline,

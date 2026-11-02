@@ -11,6 +11,40 @@ from lambda_harness.workspace import Workspace, git
 from .conftest import REFACTORED, SOURCE
 from .test_phases import approved_tests
 
+
+@pytest.mark.parametrize("via_chat", [False, True])
+def test_timed_out_test_writing_continues_with_more_time_without_repeating_setup(rig, via_chat):
+    h, agent, _ = rig
+    view = h.start("timeout", "Fix addOne")
+    h.respond("timeout", "approve", approval_token=view["prompt"]["approval_token"])
+
+    def timeout(role, context, cwd):
+        if role == "test_author":
+            raise BackendError("Timed out after 600s", kind="timeout")
+        return agent(role, context, cwd)
+
+    h.agent = timeout
+    view = h.run_phase("timeout", "tests")
+    assert view["stage"] == "backend_blocked"
+    assert view["outcome"]["title"] == "Test writing timed out"
+    assert "retry_longer" in view["prompt"]["actions"]
+    assert view["prompt"]["retry_timeout_seconds"] == 1800
+    discoveries = len(agent.discovery_calls)
+    h.agent = agent
+    if via_chat:
+        agent.responses["test_author"].append(
+            {"answer": "Continuing with more time.", "next_action": "retry_longer"}
+        )
+        view = h.respond("timeout", "question", text="Please finish the implementation")
+    else:
+        view = h.respond("timeout", "retry_longer")
+    assert view["stage"] == "test_review"
+    assert len(agent.discovery_calls) == discoveries
+    assert agent.calls[-1][1]["agent_timeout"] == 1800
+    assert h._state("timeout")["agent_timeout"] == 1800
+    assert "implementer" not in [role for role, _, _ in agent.calls]
+
+
 SIGNING_ERROR = (
     "git commit failed: error: gpg failed to sign the data:\n"
     "[GNUPG:] KEY_CONSIDERED 64AA0918461E3C542FC5F5E4C574785FF89B8E25 2\n"

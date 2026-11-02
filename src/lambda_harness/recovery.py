@@ -58,6 +58,11 @@ def recovery_actions(state):
         actions.append("start_implementation")
     if can_recover(state):
         actions.append("question")
+    if (
+        state.get("prompt", {}).get("backend_failure", {}).get("kind") == "timeout"
+        and state.get("agent_timeout", 600) < 7200
+    ):
+        actions.append("retry_longer")
     if can_recover(state) and saved_coverage_gap(state):
         actions.append("revise_tests")
     if commit_failed(state):
@@ -68,6 +73,12 @@ def recovery_actions(state):
 def recovery_prompt(state):
     prompt = dict(state["prompt"])
     prompt["actions"] = recovery_actions(state)
+    if "retry_longer" in prompt["actions"]:
+        prompt["retry_timeout_seconds"] = min(7200, max(1800, state.get("agent_timeout", 600) * 2))
+        prompt["guidance"] = (
+            "Continue with more time, or give revised instructions. "
+            "The last completed setup report is not an implementation result."
+        )
     if gap := saved_coverage_gap(state):
         prompt["coverage_gap"] = gap
     if commit_failed(state):

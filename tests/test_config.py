@@ -89,3 +89,20 @@ def test_repository_config_is_never_automatically_executed(tmp_path, monkeypatch
 def test_model_arguments_must_forward_the_selected_model():
     with pytest.raises(ValueError, match="model_args"):
         Backend(command=["tool"], model_args=["--model", "fixed-model"])
+
+
+def test_task_timeout_reaches_selected_agent_without_leaking_to_other_tasks(monkeypatch, tmp_path):
+    from lambda_harness.backends import CommandAgent
+
+    seen = []
+
+    def invoke(self, role, context, cwd):
+        seen.append((self.timeout, self.model, self.effort))
+        return {"answer": "Done"}
+
+    monkeypatch.setattr(CommandAgent, "__call__", invoke)
+    settings = Settings(default_backend="one", backends={"one": Backend(command=["one"])})
+    agent = RoutedAgent(settings, model="chosen", effort="high")
+    agent("interviewer", {"agent_timeout": 1800}, tmp_path)
+    agent("interviewer", {}, tmp_path)
+    assert seen == [(1800, "chosen", "high"), (600, "chosen", "high")]

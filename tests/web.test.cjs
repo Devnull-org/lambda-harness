@@ -4514,6 +4514,48 @@ test("baseline correction is visible in conversation and confirms the exact task
   assert.doesNotMatch(history.textContent, /new-commit/);
 });
 
+test("a timeout is the final conversation card with a longer retry action", async () => {
+  const current = snapshot({
+    ...task(),
+    stage: "backend_blocked",
+    messages: [
+      { role: "validation_discovery", answer: "Read-only discovery finished" },
+    ],
+    outcome: {
+      kind: "error",
+      title: "Test writing timed out",
+      detail: "No result before 600 seconds",
+    },
+    prompt: {
+      actions: ["retry", "retry_longer", "question"],
+      retry_timeout_seconds: 1800,
+      backend_failure: { kind: "timeout" },
+    },
+  });
+  const commands = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (url === "/api/command") commands.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  const last = ui.elements.get("history").lastElementChild;
+  assert.match(last.textContent, /Test writing timed out/);
+  assert.match(last.textContent, /not an implementation result/);
+  const next = descendants(last, "button").find((b) =>
+    /30 min limit/.test(b.textContent),
+  );
+  await next.onclick();
+  assert.equal(commands[0].action, "retry_longer");
+  assert.equal(commands[0].task_id, "example");
+  current.job = { task_id: "example", running: true, log: ["Writing tests"] };
+  await ui.run("refresh()");
+  assert.doesNotMatch(
+    ui.elements.get("history").lastElementChild.textContent,
+    /timed out/,
+  );
+});
+
 test("expired session reconnects without reloading or losing the task draft", async () => {
   const current = snapshot();
   const ui = await app({ fetcher: async () => response(current) });

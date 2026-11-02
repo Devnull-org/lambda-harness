@@ -124,6 +124,9 @@ passphrase in chat. Do not change global Git settings or bypass validation or ap
 Return next_action=null for questions, advice, and alternatives the developer has not
 chosen. If the developer explicitly requests a supported recovery action, select it
 from recovery_actions. retry reruns the failed operation with their new instructions;
+retry_longer continues a timed-out operation with a longer task-specific time limit.
+Use it when available and the developer asks to continue or finish after a timeout,
+unless they explicitly request the same limit. The harness preserves completed setup.
 recheck reruns validation. continue_without_commits is available only at a failed
 commit and disables further commits for this task while checks and reviews continue.
 Do not select it just because the error concerns signing. Unsupported operations

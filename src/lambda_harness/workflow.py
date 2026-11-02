@@ -873,6 +873,13 @@ class Harness(CheckRunner):
             guidance = "Run checks again or give the agent new instructions."
         elif stage in errors:
             kind, title = "error", "Stopped: action needed"
+            if prompt.get("backend_failure", {}).get("kind") == "timeout":
+                label = {
+                    "tests": "Test writing",
+                    "implement": "Implementation",
+                    "discover_validation": "Check discovery",
+                }.get(state.get("retry_node"), "Agent response")
+                title = label + " timed out"
             detail = prompt.get("error") or prompt.get("summary") or "The last step failed."
             if prompt.get("provider_message"):
                 detail += "\n" + prompt["provider_message"]
@@ -1135,6 +1142,7 @@ class Harness(CheckRunner):
             "approved_tests": state.get("approved_tests", {}),
             "missing_implementation": state.get("test_missing_implementation", []),
             "workflow_actions": self._workflow_actions(state),
+            "agent_timeout": state.get("agent_timeout"),
             "validation_config": state.get("validation_config", self.validation.model_dump()),
             "validation_knowledge": state.get("validation_knowledge"),
             "patches": [
@@ -2335,12 +2343,30 @@ class Harness(CheckRunner):
         state["phase_fingerprint"] = self._workspace(state).fingerprint()
         state["next"] = "end"
 
+    def _retry_longer(self, state):
+        timeout = recovery_prompt(state)["retry_timeout_seconds"]
+        node = state["retry_node"]
+        if node == "reply":
+            state.update(state.pop("failed_reply"))
+        state["agent_timeout"] = timeout
+        state["messages"].append(
+            {
+                "agent_role": NODE_ROLES.get(node, "interviewer"),
+                "answer": "Continuing the interrupted step with a "
+                f"{timeout // 60}-minute agent time limit. "
+                "The approved scope and existing work are preserved.",
+            }
+        )
+        state["next"] = node
+
     def _reply(self, state):
         response = state.pop("response")
         action, stage = response["action"], state["stage"]
         if "automatic" in response:
             state["mode"] = "full" if response["automatic"] else "phased"
-        if action == "approve_baseline":
+        if action == "retry_longer":
+            self._retry_longer(state)
+        elif action == "approve_baseline":
             self._apply_baseline(state)
         elif action == "cancel_baseline":
             previous = state.pop("baseline_resume")
@@ -2537,7 +2563,7 @@ class Harness(CheckRunner):
                 recovery_actions=[
                     a
                     for a in recovery_actions(state)
-                    if a in {"retry", "recheck", "continue_without_commits"}
+                    if a in {"retry", "retry_longer", "recheck", "continue_without_commits"}
                 ],
             )
             chosen = answer.get("next_action")
@@ -2553,7 +2579,9 @@ class Harness(CheckRunner):
             if answer.get("workflow_action"):
                 self._workflow_action(state, answer["workflow_action"])
                 return
-            if chosen == "continue_without_commits":
+            if chosen == "retry_longer":
+                self._retry_longer(state)
+            elif chosen == "continue_without_commits":
                 self._continue_without_commits(state)
             elif chosen in {"retry", "recheck"}:
                 state["messages"].append({"agent_role": role, "text": response["text"]})

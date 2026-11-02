@@ -92,6 +92,7 @@ LOCAL_FIELDS = {
     "handoff_resume",
 }
 STATE_FIELDS = {
+    "agent_timeout",
     "baseline_plan",
     "baseline_resume",
     "baseline_resume_tests",
@@ -238,6 +239,10 @@ def _replace(value, replacements):
 
 
 def _validate_state(state):
+    if "agent_timeout" in state and (
+        type(state["agent_timeout"]) is not int or not 0 < state["agent_timeout"] <= 7200
+    ):
+        raise ValueError("Invalid task agent time limit")
     if state.get("baseline_plan") or state.get("instruction_boundary"):
         raise ValueError(
             "Finish or cancel the pending workflow action before transferring this task"

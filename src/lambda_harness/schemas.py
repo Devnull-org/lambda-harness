@@ -204,7 +204,9 @@ class WorkflowReply(Explanation):
 
 
 class RecoveryReply(WorkflowReply):
-    next_action: Literal["retry", "recheck", "continue_without_commits"] | None = None
+    next_action: Literal["retry", "retry_longer", "recheck", "continue_without_commits"] | None = (
+        None
+    )
 
 
 class CheckCommand(Record):

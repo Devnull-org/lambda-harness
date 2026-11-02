@@ -109,6 +109,8 @@ class RoutedAgent:
 
     def __call__(self, role, context, cwd):
         agent = self.resolve(role)
+        if context.get("agent_timeout") is not None:
+            agent.timeout = max(agent.timeout, Backend.positive_timeout(context["agent_timeout"]))
         result = agent(role, context, cwd)
         self.last_generation = {
             "backend": agent.name,
