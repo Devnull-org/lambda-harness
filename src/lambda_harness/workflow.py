@@ -16,6 +16,7 @@ from pydantic import ValidationError
 
 from .agent_context import CODING_ROLES, NODE_ROLES, STAGE_ROLES, messages_for_agent
 from .agent_library import AVATARS, ROLES, AgentLibrary
+from .baseline import apply_baseline, plan_baseline
 from .check_runner import CheckRunner
 from .cleanup import cleanup_plan, remove_resources
 from .conversation import conversation_messages, interview_message
@@ -108,6 +109,7 @@ class Harness(CheckRunner):
             "run_checks",
             "prepare",
             "chat",
+            "task_instruction",
             "agent_builder",
             "explore",
             "standalone_review",
@@ -481,17 +483,31 @@ class Harness(CheckRunner):
             save_json(Path(state["report_directory"]) / "current-review.json", self._view(state))
             return self._view(self._state(task_id))
 
-    def task_chat(self, task_id, text):
+    def task_chat(self, task_id, text, *, automatic=None):
         """Discuss a task; exploration messages can explicitly request a coding handoff."""
         if not text.strip():
             raise ValueError("Enter a question about this task")
+        if automatic is not None and not isinstance(automatic, bool):
+            raise ValueError("Automatic must be enabled or disabled")
         with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
+            if automatic is not None:
+                state["mode"] = "full" if automatic else "phased"
             if state["stage"] == "exploration_ready":
                 if self._workspace(state).fingerprint() != state["phase_fingerprint"]:
                     raise ValueError("Worktree changed since exploration; restore it first")
                 state["messages"].append({"stage": "exploration", "text": text})
                 state["next"] = "explore"
+                self.graph.invoke(state, self._config(task_id))
+                return self._view(self._state(task_id))
+            if not self.graph.get_state(self._config(task_id)).next and self._workflow_actions(
+                state
+            ):
+                state["instruction_boundary"] = {
+                    key: copy.deepcopy(state[key]) for key in ("stage", "prompt", "next")
+                }
+                state["instruction_text"] = text
+                state["next"] = "task_instruction"
                 self.graph.invoke(state, self._config(task_id))
                 return self._view(self._state(task_id))
             if state.get("task_kind") == "agent_builder":
@@ -532,6 +548,7 @@ class Harness(CheckRunner):
                     messages=state["messages"],
                     task_stage=state["stage"],
                     workflow_status=workflow_status,
+                    workflow_actions=[],
                     pending_step=state.get("prompt"),
                     check_results=state.get("check_results"),
                     findings=state.get("findings", []),
@@ -592,6 +609,7 @@ class Harness(CheckRunner):
                 "save_agent",
                 "continue_handoff",
                 "start_implementation",
+                "approve_baseline",
                 "continue_implementation",
                 "approve_changes",
                 "revise_changes",
@@ -892,6 +910,10 @@ class Harness(CheckRunner):
             kind, title = "waiting", "Research ready"
             detail = "Ask the agent to implement the discussed change, or continue researching."
             guidance = "Start implementation carries this conversation into the coding workflow."
+        elif stage == "baseline_review":
+            kind, title = "waiting", "Confirm baseline change"
+            detail = prompt["summary"]
+            guidance = "Use this baseline & continue preserves the approved scope and resumes work."
         elif stage == "specification_review" and state.get("implementation_handoff"):
             kind, title = "waiting", "Approve scope to start coding"
             detail = "The agent prepared the implementation scope from your research."
@@ -1112,6 +1134,7 @@ class Harness(CheckRunner):
             "base_revision": state["base"],
             "approved_tests": state.get("approved_tests", {}),
             "missing_implementation": state.get("test_missing_implementation", []),
+            "workflow_actions": self._workflow_actions(state),
             "validation_config": state.get("validation_config", self.validation.model_dump()),
             "validation_knowledge": state.get("validation_knowledge"),
             "patches": [
@@ -1430,6 +1453,185 @@ class Harness(CheckRunner):
                 raise ValueError(f"Unknown Cabal package: {package}")
         state["next"] = "tests"
 
+    def _clean_baseline(self, state):
+        if (
+            state.get("task_kind", "feature") != "feature"
+            or state.get("commits")
+            or state.get("test_paths")
+            or state.get("approved_tests")
+            or state.get("selected_findings")
+            or state.get("checks_origin")
+        ):
+            return False
+        workspace = self._workspace(state)
+        return workspace.revision == state["base"] and not git(
+            workspace.path, "status", "--porcelain"
+        )
+
+    def _workflow_actions(self, state):
+        actions = [
+            action
+            for phase, action in [
+                ("tests", "write_tests"),
+                ("implement", "implement"),
+                ("refactor", "refactor"),
+            ]
+            if phase in self._available_phases(state)
+        ]
+        if state["stage"] == "test_scope_review":
+            actions.append("revise_tests")
+        if (
+            state["stage"]
+            in {
+                "specification_ready",
+                "specification_review",
+                "tests_requested",
+                "test_scope_review",
+                "baseline_review",
+            }
+            or state["stage"] in {"agent_error", "backend_blocked", "validation_setup"}
+            and state.get("retry_node", state.get("validation_following"))
+            in {"tests", "discover_validation", "task_instruction"}
+            or state["stage"] in {"agent_error", "backend_blocked"}
+            and state.get("failed_reply", {}).get("stage")
+            in {"test_scope_review", "baseline_review", "specification_review"}
+        ):
+            if self._clean_baseline(state):
+                actions.append("retarget_baseline")
+        return actions
+
+    def _task_instruction(self, state):
+        state.update(state["instruction_boundary"])
+        role = state.get("role") or "interviewer"
+        text = state["instruction_text"]
+        current = self._view(state)
+        answer = self._ask(
+            state,
+            role,
+            intent="explain",
+            question=text,
+            latest_user_message=text,
+            task_stage=state["stage"],
+            workflow_status={
+                "stage": state["stage"],
+                "outcome": current["outcome"],
+                "actions": current["prompt"].get("actions", []),
+                "available_phases": self._available_phases(state),
+                "specification_status": "approved"
+                if state["stage"] == "specification_ready"
+                else None,
+            },
+        )
+        state["messages"].append({"agent_role": role, "question": text, **answer})
+        if answer.get("workflow_action"):
+            self._workflow_action(state, answer["workflow_action"])
+        else:
+            state["next"] = "end"
+        state.pop("instruction_boundary", None)
+        state.pop("instruction_text", None)
+
+    def _workflow_action(self, state, request, *, allowed=None, resume_tests=False):
+        action = request["action"]
+        if action not in (self._workflow_actions(state) if allowed is None else allowed):
+            raise ValueError("That workflow action is unavailable at the current step")
+        if action == "retarget_baseline":
+            if not self._clean_baseline(state):
+                raise ValueError(
+                    "Preserve the task's existing changes before changing its baseline"
+                )
+            plan = plan_baseline(
+                self.repository,
+                self._workspace(state),
+                state["base"],
+                request["checkout"],
+                request.get("revision"),
+            )
+            if "baseline_resume" not in state:
+                previous = state.get("failed_reply", state.get("instruction_boundary", state))
+                state["baseline_resume"] = {
+                    "stage": previous["stage"],
+                    "prompt": copy.deepcopy(previous["prompt"]),
+                    "next": "pause" if previous["prompt"].get("actions") else "end",
+                }
+                if resume_tests:
+                    state["baseline_resume"] = {
+                        "stage": "test_scope_review",
+                        "next": "pause",
+                        "prompt": {
+                            "summary": "Baseline unchanged. Give revised instructions to continue.",
+                            "actions": ["question", "revise"],
+                        },
+                    }
+                state["baseline_resume_tests"] = (
+                    resume_tests or previous["stage"] != "specification_review"
+                )
+            state["baseline_plan"] = plan
+            self._gate(
+                state,
+                "baseline_review",
+                {
+                    "summary": request["reason"],
+                    "baseline": plan,
+                    "explanation": "Update only this task's clean worktree. Keep its conversation "
+                    "and approved scope, rediscover checks, and continue. "
+                    "The source checkout is unchanged.",
+                },
+                ["approve_baseline", "question", "cancel_baseline"],
+            )
+            return
+        if action == "revise_tests":
+            state["messages"].append({"agent_role": "test_author", "text": request["reason"]})
+            state["next"] = "tests"
+            return
+        phase = {"write_tests": "tests", "implement": "implement", "refactor": "refactor"}[action]
+        if self._workspace(state).fingerprint() != state.get("phase_fingerprint"):
+            raise ValueError("The task worktree changed since the completed step; inspect it first")
+        state["selected_phase"] = phase
+        state["next"] = "worktree" if phase == "tests" else phase
+        if state["stage"] == "specification_ready" and phase in {"implement", "refactor"}:
+            state["next"] = "existing_tests"
+        state["prompt"], state["attempts"], state["patch_count"] = {}, 0, 0
+
+    def _apply_baseline(self, state):
+        plan = state["baseline_plan"]
+        receipt = Path(state["directory"]) / "baseline-changes" / (digest(plan) + ".json")
+        authorized = receipt.exists() and json.loads(receipt.read_text()).get("plan") == plan
+        save_json(receipt, {"plan": plan, "status": "approved"})
+        apply_baseline(self.repository, self._workspace(state), plan, already_authorized=authorized)
+        state["base"] = state["base_ref"] = plan["to"]
+        for key in (
+            "validation_knowledge",
+            "validation_following",
+            "validation_detailed",
+            "retry_node",
+            "failed_reply",
+            "rejected_test_proposal",
+            "test_revision",
+        ):
+            state.pop(key, None)
+        state["validation_config"] = ValidationConfig.model_validate(
+            state.get("validation_overrides", {})
+        ).model_dump()
+        state["messages"].append(
+            {
+                "role": "test_author",
+                "answer": f"Baseline updated to {plan['to']} from {plan['checkout']}. "
+                "Approved scope preserved. Continuing against the corrected worktree.",
+                "baseline_change": plan,
+            }
+        )
+        previous = state.pop("baseline_resume")
+        resume_tests = state.pop("baseline_resume_tests")
+        state.pop("baseline_plan")
+        save_json(receipt, {"plan": plan, "status": "applied"})
+        if resume_tests:
+            self._phase_complete(
+                state, "specification_ready", "Baseline updated; approved scope preserved."
+            )
+            state["next"] = "worktree"
+        else:
+            self._gate(state, previous["stage"], previous["prompt"], previous["prompt"]["actions"])
+
     def _existing_tests(self, state):
         self._worktree(state)
         workspace = self._workspace(state)
@@ -1464,11 +1666,17 @@ class Harness(CheckRunner):
             state,
             "test_author",
             test_revision=state.get("test_revision"),
+            workflow_actions=["retarget_baseline"] if self._clean_baseline(state) else [],
             specification_status=(
                 "developer_supplied" if state.get("task_kind") == "tests" else "approved"
             ),
         )
         state.pop("test_revision", None)
+        if proposal.get("workflow_action"):
+            self._workflow_action(
+                state, proposal["workflow_action"], allowed=["retarget_baseline"], resume_tests=True
+            )
+            return
         if not proposal["changes"]:
             state["messages"].append({"role": "test_author", "answer": proposal["summary"]})
             self._gate(
@@ -2132,7 +2340,15 @@ class Harness(CheckRunner):
         action, stage = response["action"], state["stage"]
         if "automatic" in response:
             state["mode"] = "full" if response["automatic"] else "phased"
-        if action == "revise_tests":
+        if action == "approve_baseline":
+            self._apply_baseline(state)
+        elif action == "cancel_baseline":
+            previous = state.pop("baseline_resume")
+            state.pop("baseline_plan", None)
+            state.update(previous)
+            if state["next"] == "pause":
+                self._gate(state, state["stage"], state["prompt"], state["prompt"]["actions"])
+        elif action == "revise_tests":
             gap = saved_coverage_gap(state)
             state["test_revision"] = {
                 "previous_proposal": saved_test_proposal(state),
@@ -2182,6 +2398,8 @@ class Harness(CheckRunner):
             state["messages"].append({"stage": stage, "text": response["text"]})
             state["next"] = "discover_validation"
         elif stage == "agent_paused" and action == "revise":
+            if state["retry_node"] == "task_instruction":
+                state["instruction_text"] = response["text"]
             if state["retry_node"] == "reply":
                 state.update(state.pop("failed_reply"))
                 state["response"]["text"] = response["text"]
@@ -2332,6 +2550,9 @@ class Harness(CheckRunner):
                     **answer,
                 }
             )
+            if answer.get("workflow_action"):
+                self._workflow_action(state, answer["workflow_action"])
+                return
             if chosen == "continue_without_commits":
                 self._continue_without_commits(state)
             elif chosen in {"retry", "recheck"}:
@@ -2346,6 +2567,7 @@ class Harness(CheckRunner):
                 "specification_review": "interviewer",
                 "test_review": "test_author",
                 "test_scope_review": "test_author",
+                "baseline_review": "test_author",
                 "test_change_review": state.get("role", "implementer"),
                 "review_findings": "security_reviewer"
                 if "SEC-" in response["text"]
@@ -2366,6 +2588,12 @@ class Harness(CheckRunner):
                     }
                 ),
             )
+            if answer.get("workflow_action"):
+                state["messages"].append(
+                    {"agent_role": role, "question": response["text"], "answer": answer["answer"]}
+                )
+                self._workflow_action(state, answer["workflow_action"])
+                return
             proposal = answer.get("proposal") if stage == "test_change_review" else None
             revision = None
             if proposal is not None:

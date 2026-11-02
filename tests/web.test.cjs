@@ -3134,7 +3134,7 @@ test("conversation task chat sends a contextual question without a workflow acti
   assert.equal(posted.task_id, "example");
   assert.equal(posted.text, "Suggest a commit message");
   assert.equal(posted.action, undefined);
-  assert.equal(posted.automatic, undefined);
+  assert.equal(posted.automatic, false);
   assert.equal(ui.elements.get("message").value, "");
   current.job = {
     running: true,
@@ -4467,6 +4467,51 @@ test("exploration starts implementation from the compact status using the select
   assert.equal(completed.label, "Start implementation");
   assert.equal(completed.body.command, "run");
   assert.equal(completed.body.phase, "implement");
+});
+
+test("baseline correction is visible in conversation and confirms the exact task plan", async () => {
+  const current = snapshot({
+    ...task(),
+    stage: "baseline_review",
+    mode: "full",
+    prompt: {
+      summary: "Use the checkout with the existing policy code",
+      approval_token: "baseline-token",
+      actions: ["approve_baseline", "question", "cancel_baseline"],
+      baseline: {
+        checkout: "/project/intended",
+        from: "old-commit",
+        to: "new-commit",
+      },
+    },
+  });
+  const commands = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (url === "/api/command") commands.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  const history = ui.elements.get("history");
+  assert.match(history.textContent, /\/project\/intended/);
+  assert.match(history.textContent, /old-commit → new-commit/);
+  assert.match(
+    history.textContent,
+    /approved scope and conversation stay saved/,
+  );
+  const confirm = descendants(history, "button").find(
+    (b) => b.textContent === "Use this baseline & continue",
+  );
+  assert.ok(confirm);
+  await confirm.onclick();
+  assert.equal(commands[0].action, "approve_baseline");
+  assert.equal(commands[0].task_id, "example");
+  assert.equal(commands[0].token, "baseline-token");
+  assert.equal(commands[0].automatic, true);
+  current.task.prompt.baseline.to = "updated-commit";
+  await ui.run("refresh()");
+  assert.match(history.textContent, /updated-commit/);
+  assert.doesNotMatch(history.textContent, /new-commit/);
 });
 
 test("expired session reconnects without reloading or losing the task draft", async () => {

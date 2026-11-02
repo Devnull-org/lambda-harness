@@ -22,6 +22,7 @@ from .workspace import Workspace, digest, git, task_branch, validate_task_name
 MAX_HANDOFF_BYTES = 32 * 1024 * 1024
 MAX_TASKS = 30
 GATES = {
+    "baseline_review": {"approve_baseline", "question", "cancel_baseline"},
     "checks_plan": {"question", "revise", "run_checks"},
     "checks_complete": {"question", "revise", "run_checks"},
     "checks_failed": {"question", "revise", "run_checks"},
@@ -57,6 +58,7 @@ BOUNDARIES = {
     "review_complete",
 }
 RETRY_NODES = {
+    "task_instruction",
     "plan_checks",
     "run_checks",
     "discover_validation",
@@ -90,6 +92,11 @@ LOCAL_FIELDS = {
     "handoff_resume",
 }
 STATE_FIELDS = {
+    "baseline_plan",
+    "baseline_resume",
+    "baseline_resume_tests",
+    "instruction_boundary",
+    "instruction_text",
     "implementation_handoff",
     "check_plan",
     "check_results",
@@ -231,6 +238,10 @@ def _replace(value, replacements):
 
 
 def _validate_state(state):
+    if state.get("baseline_plan") or state.get("instruction_boundary"):
+        raise ValueError(
+            "Finish or cancel the pending workflow action before transferring this task"
+        )
     if set(state) - STATE_FIELDS:
         raise ValueError("This handoff contains unsupported workflow fields")
     for name in ("task_id", "request", "base", "base_ref", "stage", "next", "initial_phase"):

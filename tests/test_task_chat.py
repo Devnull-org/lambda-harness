@@ -79,19 +79,22 @@ def test_chat_survives_reopening_and_does_not_repeat_replies_or_block_next_step(
         reopened.close()
 
 
-def test_failed_task_chat_keeps_workflow_and_can_be_retried(rig):
+def test_failed_boundary_instruction_preserves_scope_and_offers_retry(rig):
     harness, agent, _ = rig
     view = specification(harness)
     original = copy.deepcopy(harness._state("task"))
     normal_agent = harness.agent
     harness.agent = lambda *args: (_ for _ in ()).throw(AgentInterrupted())
-    with pytest.raises(AgentInterrupted):
-        harness.task_chat("task", "Explain the task")
-    assert harness._state("task") == original
-    assert "did not complete" in conversation_messages(harness._state("task"))[-1]["answer"]
+    paused = harness.task_chat("task", "Explain the task")
+    assert paused["stage"] == "agent_paused"
+    assert "retry" in paused["prompt"]["actions"]
+    saved = harness._state("task")
+    assert saved["specification"] == original["specification"]
+    assert saved["phase_fingerprint"] == original["phase_fingerprint"]
+    assert saved["instruction_text"] == "Explain the task"
     harness.agent = normal_agent
     agent.responses["interviewer"].append({"answer": "Here is the explanation"})
-    result = harness.task_chat("task", "Explain the task")
+    result = harness.respond("task", "retry")
     assert result["stage"] == view["stage"]
     assert conversation_messages(harness._state("task"))[-1]["answer"] == "Here is the explanation"
     with pytest.raises(ValueError, match="Enter a question"):
@@ -118,5 +121,7 @@ def test_task_chat_receives_authoritative_approval_and_available_next_steps(rig)
     assert "approve" not in status["actions"]
     assert status["available_phases"] == approved["prompt"]["available_phases"]
     assert {"tests", "implement"} <= set(status["available_phases"])
-    assert harness._state("task") == before
+    assert {k: v for k, v in harness._state("task").items() if k not in {"messages", "seq"}} == {
+        k: v for k, v in before.items() if k not in {"messages", "seq"}
+    }
     assert not executor.calls

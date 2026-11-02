@@ -350,6 +350,8 @@ class LocalApp:
                 if saved["stage"] == "test_change_review" and saved.get("next") == "pause":
                     # Questions refresh approval tokens without creating a new patch request.
                     item["permission_request"] = digest(saved["proposed_test_change"])
+                if saved["stage"] == "baseline_review" and saved.get("next") == "pause":
+                    item["permission_request"] = digest(saved["baseline_plan"])
                 if (
                     saved["stage"] in {"validation_blocked", "backend_blocked", "agent_error"}
                     and saved.get("next") == "pause"
@@ -596,7 +598,9 @@ class LocalApp:
             elif action == "task_checks":
                 result = harness.run_task_checks(task_id)
             elif action == "task_chat":
-                result = harness.task_chat(task_id, command.get("text", ""))
+                result = harness.task_chat(
+                    task_id, command.get("text", ""), automatic=command.get("automatic")
+                )
             elif action in {"start", "explore", "chat"}:
                 if not command.get("base"):
                     raise ValueError("Choose a base branch or commit")

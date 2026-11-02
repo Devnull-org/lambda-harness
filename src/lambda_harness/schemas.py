@@ -110,7 +110,21 @@ class Tests(Record):
     commit_message: str = Field(min_length=1, max_length=2000)
 
 
+class WorkflowAction(Record):
+    action: Literal["write_tests", "implement", "refactor", "revise_tests", "retarget_baseline"]
+    checkout: str | None = None
+    revision: str | None = None
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_checkout(self):
+        if self.action == "retarget_baseline" and not (self.checkout or "").strip():
+            raise ValueError("A baseline correction requires the intended checkout path")
+        return self
+
+
 class FeatureTests(Tests):
+    workflow_action: WorkflowAction | None = None
     missing_implementation: list[str] = Field(
         default_factory=list,
         description="Production APIs required by these tests but not implemented yet. "
@@ -125,6 +139,8 @@ class FeatureTests(Tests):
 
     @model_validator(mode="after")
     def require_failures_for_changes(self):
+        if self.workflow_action and self.changes:
+            raise ValueError("Request a workflow action separately from a patch")
         if bool(self.changes) != bool(self.expected_failures):
             raise ValueError(
                 "A test patch needs named failures; a scope decision must contain neither"
@@ -183,7 +199,11 @@ class Explanation(Record):
     suggested_commands: list[SuggestedCommand] = Field(default_factory=list, max_length=8)
 
 
-class RecoveryReply(Explanation):
+class WorkflowReply(Explanation):
+    workflow_action: WorkflowAction | None = None
+
+
+class RecoveryReply(WorkflowReply):
     next_action: Literal["retry", "recheck", "continue_without_commits"] | None = None
 
 
@@ -330,7 +350,7 @@ def schema_for(role, context):
     }:
         return PatchConversation
     if context.get("intent") == "explain":
-        return Explanation
+        return WorkflowReply if context.get("workflow_actions") else Explanation
     if role == "test_author" and context.get("task_kind", "feature") == "feature":
         return FeatureTests
     if (

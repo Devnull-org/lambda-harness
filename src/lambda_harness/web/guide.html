@@ -250,6 +250,16 @@
           need to implement the change yourself.
         </p>
         <p>
+          You can give workflow instructions in the conversation: “write the
+          tests,” “implement using existing tests,” or “use /path/to/checkout at
+          COMMIT and continue.” The agent starts available phases directly.
+          Baseline corrections show the exact checkout and commit with
+          <strong>Use this baseline &amp; continue</strong>. Confirmation
+          updates only this task’s clean worktree and keeps its approved scope.
+          Commit unsaved source changes first; another repository requires
+          selecting its project.
+        </p>
+        <p>
           A coding agent can ask for permission before applying a patch. Changes
           to tests, protected Cabal settings, or build configuration request it
           automatically. A permission card in the conversation shows the reason,

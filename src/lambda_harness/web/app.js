@@ -248,6 +248,8 @@ let reviewFromPR = false,
   prBase = "",
   baseInitialized = false;
 const labels = {
+  approve_baseline: "Use this baseline & continue",
+  cancel_baseline: "Keep current baseline",
   start_implementation: "Start implementation",
   approve_changes: "Approve changes and continue",
   deny_changes: "Deny and revise",
@@ -1081,7 +1083,7 @@ async function command(body) {
   )
     body = { ...body, command: "respond", action: "retry" };
   if (
-    ["run", "respond"].includes(body.command) &&
+    ["run", "respond", "task_chat"].includes(body.command) &&
     state?.task?.task_id === body.task_id &&
     body.automatic === undefined &&
     (state.task.task_kind || "feature") === "feature"
@@ -1548,6 +1550,40 @@ function permissionCard(task) {
   entry.append(controls);
   return entry;
 }
+function baselineCard(task) {
+  if (task.stage !== "baseline_review") return null;
+  const plan = task.prompt.baseline;
+  const entry = message("Agent · Confirm baseline change", task.prompt.summary);
+  entry.className = "message permission-request";
+  section(entry, "Use code from", plan.checkout);
+  section(entry, "Task baseline", `${plan.from} → ${plan.to}`);
+  entry.append(
+    prose(
+      "Your approved scope and conversation stay saved. The agent will continue in this task’s worktree.",
+    ),
+  );
+  const controls = el("div", undefined, "button-row");
+  for (const action of ["approve_baseline", "cancel_baseline"]) {
+    const control = button(
+      labels[action],
+      () => {
+        if (selected !== task.task_id) return;
+        return command({
+          command: "respond",
+          task_id: task.task_id,
+          action,
+          token: task.prompt.approval_token,
+        });
+      },
+      action === "approve_baseline" ? "primary" : "quiet",
+    );
+    control.disabled =
+      submitting || !!currentJob()?.running || !!connectionError || handoffBusy;
+    controls.append(control);
+  }
+  entry.append(controls);
+  return entry;
+}
 function scrollToLatestMessage() {
   if (page !== "workspace") return;
   $("history").lastElementChild?.scrollIntoView({ block: "end" });
@@ -1570,7 +1606,9 @@ function renderHistory(task) {
     messages,
     pending,
     task.review_actions,
-    task.stage === "test_change_review" ? task.prompt : null,
+    ["test_change_review", "baseline_review"].includes(task.stage)
+      ? task.prompt
+      : null,
     currentJob()?.permission,
     pendingPermissionDecisions.has(currentJob()?.permission?.id),
     connectionError,
@@ -1737,6 +1775,8 @@ function renderHistory(task) {
   if (runtimePermission) history.append(runtimePermission);
   const permission = permissionCard(task);
   if (permission) history.append(permission);
+  const baseline = baselineCard(task);
+  if (baseline) history.append(baseline);
   if (progress) {
     const entry = el("div", undefined, "message response-progress");
     entry.role = "status";
@@ -1808,6 +1848,16 @@ function focusTaskInstructions(task) {
 }
 function taskContinuation(task) {
   const actions = task.prompt?.actions || [];
+  if (actions.includes("approve_baseline"))
+    return {
+      label: labels.approve_baseline,
+      body: {
+        command: "respond",
+        task_id: task.task_id,
+        action: "approve_baseline",
+        token: task.prompt.approval_token,
+      },
+    };
   if (
     actions.includes("start_implementation") ||
     (task.stage === "exploration_ready" &&
