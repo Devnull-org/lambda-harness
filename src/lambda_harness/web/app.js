@@ -258,6 +258,7 @@ const labels = {
   continue_implementation: "Continue implementation with tests unchanged",
   continue_handoff: "Continue from saved step",
   save_agent: "Save to repository",
+  task_chat: "Give instructions or ask a question",
   answer: "Answer",
   question: "Ask a question",
   revise: "Revise instructions",
@@ -2145,6 +2146,13 @@ function renderTask(task, running) {
       task.review_actions,
       running,
     ]);
+  if (
+    (task.task_kind || "feature") === "feature" &&
+    task.can_task_chat &&
+    !messageActions.includes("question") &&
+    !messageActions.includes("task_chat")
+  )
+    messageActions.push("task_chat");
   $("task-meta").replaceChildren(
     el("strong", stageLabel(task.stage)),
     el("div", "Base: " + task.base_ref + " · " + task.base.slice(0, 12)),

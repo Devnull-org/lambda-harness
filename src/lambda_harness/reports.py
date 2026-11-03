@@ -126,7 +126,7 @@ def pr_description(state):
     if state.get("commit_policy") == "manual":
         lines += [
             "Changes remain uncommitted in the task worktree. Commit them manually when ready.",
-            f"Reviewed working-tree fingerprint: `{state['review_fingerprint']}`",
+            f"Handoff working-tree fingerprint: `{state['review_fingerprint']}`",
             "",
             *[
                 f"- Uncommitted: {patch['summary']}"
@@ -134,12 +134,23 @@ def pr_description(state):
             ],
             "",
         ]
-    for name, command in state["validation"]["commands"].items():
+    if state.get("workflow_skips"):
+        lines += ["Skipped by developer instruction: " + ", ".join(state["workflow_skips"]), ""]
+    for name, command in state.get("validation", {}).get("commands", {}).items():
         lines.append(f"- {name}: `{' '.join(command['argv'])}`; exit {command['exit_code']}")
-    lines += ["", f"Reviewed revision: `{state['review_revision']}`", "", "Review results", ""]
+    reviewed = any(
+        state.get(role) and not state[role].get("skipped")
+        for role in ("haskell_reviewer", "security_reviewer")
+    )
+    revision_label = "Reviewed revision" if reviewed else "Handoff revision (not reviewed)"
+    lines += ["", f"{revision_label}: `{state['review_revision']}`", "", "Review results", ""]
     for role in ("haskell_reviewer", "security_reviewer"):
-        lines += [f"{role.replace('_', ' ').capitalize()}: {state[role]['summary']}", ""]
-        for finding in state[role]["findings"]:
+        lines += [
+            f"{role.replace('_', ' ').capitalize()}: "
+            + state.get(role, {}).get("summary", "Not performed"),
+            "",
+        ]
+        for finding in state.get(role, {}).get("findings", []):
             lines += [
                 f"- {finding['id']} ({finding['severity']}, {finding['confidence']}): "
                 f"{finding['title']} at {finding['location']}",

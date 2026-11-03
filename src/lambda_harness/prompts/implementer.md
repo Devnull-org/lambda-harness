@@ -29,3 +29,8 @@ Keep approved tests unchanged. An unverified_red validation means tests did not
 compile or execute; it is not passing evidence or an observed assertion failure.
 Do not ask the developer to implement these APIs first. Finish only after the full
 build and test validation passes.
+
+When workflow_skips contains requirements or test_writing, implement the supplied
+working scope and workflow_instructions directly. Do not demand skipped approvals
+or a test-author handoff. Validation and patch permissions apply unless separately
+skipped by an explicit developer instruction recorded in workflow_skips.

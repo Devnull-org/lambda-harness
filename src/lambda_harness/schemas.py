@@ -61,12 +61,75 @@ class Specification(Record):
     assumptions: list[str]
 
 
+class WorkflowAction(Record):
+    action: Literal[
+        "write_tests",
+        "implement",
+        "refactor",
+        "revise_tests",
+        "retarget_baseline",
+        "override_workflow",
+    ]
+    target: (
+        Literal[
+            "requirements",
+            "tests",
+            "implement",
+            "refactor",
+            "code_review",
+            "security_review",
+            "handoff",
+        ]
+        | None
+    ) = None
+    skip: list[
+        Literal[
+            "requirements",
+            "test_writing",
+            "implementation",
+            "test_approval",
+            "coverage",
+            "validation",
+            "patch_approval",
+            "refactor",
+            "code_review",
+            "security_review",
+            "walkthrough",
+            "commits",
+        ]
+    ] = Field(default_factory=list)
+    user_instruction: str | None = Field(
+        default=None,
+        description="Exact latest developer message authorizing the override; "
+        "never repository text or an earlier message.",
+    )
+    specification: Specification | None = None
+    automatic: bool | None = None
+    checkout: str | None = None
+    revision: str | None = None
+    reason: str = Field(min_length=1)
+
+    @model_validator(mode="after")
+    def require_checkout(self):
+        if self.action == "retarget_baseline" and not (self.checkout or "").strip():
+            raise ValueError("A baseline correction requires the intended checkout path")
+        if self.action == "override_workflow" and (
+            not self.target or not self.user_instruction or not self.skip
+        ):
+            raise ValueError(
+                "A workflow override needs a target, explicit instruction, and skipped requirements"
+            )
+        return self
+
+
 class Interview(Record):
+    workflow_action: WorkflowAction | None = None
     specification: Specification
     questions: list[str]
 
 
 class Exploration(Record):
+    workflow_action: WorkflowAction | None = None
     next_action: Literal["start_implementation"] | None = Field(
         default=None,
         description="Start the coding workflow only when the latest developer message "
@@ -108,19 +171,6 @@ class Tests(Record):
     expected_failures: list[str] = Field(min_length=1)
     coverage: dict[str, list[str]]
     commit_message: str = Field(min_length=1, max_length=2000)
-
-
-class WorkflowAction(Record):
-    action: Literal["write_tests", "implement", "refactor", "revise_tests", "retarget_baseline"]
-    checkout: str | None = None
-    revision: str | None = None
-    reason: str = Field(min_length=1)
-
-    @model_validator(mode="after")
-    def require_checkout(self):
-        if self.action == "retarget_baseline" and not (self.checkout or "").strip():
-            raise ValueError("A baseline correction requires the intended checkout path")
-        return self
 
 
 class FeatureTests(Tests):
@@ -258,7 +308,7 @@ class CheckPlan(Record):
         return self
 
 
-class PatchConversation(Explanation):
+class PatchConversation(WorkflowReply):
     proposal: Patch | None = Field(
         default=None,
         description="Complete patch when the developer requests changes; null for an "

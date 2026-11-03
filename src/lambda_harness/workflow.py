@@ -46,6 +46,7 @@ from .validation_discovery import (
     saved_overrides,
     validation_environment,
 )
+from .workflow_overrides import WorkflowOverrides
 from .workspace import (
     Workspace,
     cabal_library_dependencies_only,
@@ -72,7 +73,7 @@ PHASE_NODES = {
 }
 
 
-class Harness(CheckRunner):
+class Harness(WorkflowOverrides, CheckRunner):
     def __init__(
         self,
         repository,
@@ -548,7 +549,7 @@ class Harness(CheckRunner):
                     messages=state["messages"],
                     task_stage=state["stage"],
                     workflow_status=workflow_status,
-                    workflow_actions=[],
+                    workflow_actions=self._workflow_actions(state),
                     pending_step=state.get("prompt"),
                     check_results=state.get("check_results"),
                     findings=state.get("findings", []),
@@ -570,6 +571,12 @@ class Harness(CheckRunner):
                 raise
             messages.append({"role": role, "task_chat_message": turn + ":assistant", **result})
             save_json(path, messages)
+            if result.get("workflow_action"):
+                self._workflow_action(state, result["workflow_action"])
+                state.pop("_workflow_message", None)
+                config = self._config(task_id)
+                self.graph.update_state(config, state, as_node="finish")
+                self.graph.invoke(state, config)
             return self._view(self._state(task_id))
 
     def respond(self, task_id, action, **fields):
@@ -1000,7 +1007,10 @@ class Harness(CheckRunner):
             "refactor_requested": ["refactor"],
             "walkthrough_ready": ["handoff"],
         }
-        if state["stage"] in {"refactor_ready", "reviews_ready"}:
+        skips = state.get("workflow_skips", [])
+        if state["stage"] in {"refactor_ready", "reviews_ready"} or (
+            state["stage"] in {"implementation_ready", "refactor_requested"} and "refactor" in skips
+        ):
             missing = [
                 phase
                 for phase, role in (
@@ -1008,11 +1018,20 @@ class Harness(CheckRunner):
                     ("review-security", "security_reviewer"),
                 )
                 if state.get(role, {}).get("revision") != state["review_revision"]
+                and {"haskell_reviewer": "code_review", "security_reviewer": "security_review"}[
+                    role
+                ]
+                not in skips
             ]
             if missing:
                 return missing
+            if "walkthrough" in skips:
+                return ["handoff"]
             return ["walkthrough"] if state["walkthrough_enabled"] else ["walkthrough", "handoff"]
-        return following.get(state["stage"], [])
+        phases = following.get(state["stage"], [])
+        if state["stage"] == "tests_requested" and "test_writing" in skips:
+            return ["implement"]
+        return phases
 
     def _phase_complete(self, state, stage, summary):
         state["stage"], state["next"] = stage, "end"
@@ -1051,13 +1070,18 @@ class Harness(CheckRunner):
             message_count = len(state["messages"])
             state.pop("_generation_for_turn", None)
             activity = (
-                "keeping validated changes uncommitted"
+                (
+                    "keeping changes uncommitted; validation skipped"
+                    if "validation" in state.get("workflow_skips", [])
+                    else "keeping validated changes uncommitted"
+                )
                 if name == "commit" and state.get("commit_policy") == "manual"
                 else name.replace("_", " ")
             )
             self.progress(f"{state['task_id']}: {activity}")
             try:
-                getattr(self, "_" + name)(state)
+                if not self._skip_workflow_node(state, name):
+                    getattr(self, "_" + name)(state)
             except (ValueError, RuntimeError, OSError) as error:
                 if name == "reply":
                     state["failed_reply"] = {
@@ -1097,6 +1121,7 @@ class Harness(CheckRunner):
                     receipts = {r: generations[r] for r in review_roles if r in generations}
                     if receipts:
                         message["generations"] = receipts
+            state.pop("_workflow_message", None)
             state["seq"] += 1
             save_json(journal, state)
             return state
@@ -1104,6 +1129,9 @@ class Harness(CheckRunner):
         return run
 
     def _gate(self, state, stage, prompt, actions):
+        if stage == "test_review" and "test_approval" in state.get("workflow_skips", []):
+            state["next"] = "commit"
+            return
         state["stage"], state["next"] = stage, "pause"
         state["gate_fingerprint"] = self._workspace(state).fingerprint()
         token = digest([state["task_id"], state["seq"], stage, state["gate_fingerprint"], prompt])
@@ -1142,6 +1170,8 @@ class Harness(CheckRunner):
             "approved_tests": state.get("approved_tests", {}),
             "missing_implementation": state.get("test_missing_implementation", []),
             "workflow_actions": self._workflow_actions(state),
+            "workflow_skips": state.get("workflow_skips", []),
+            "workflow_instructions": state.get("workflow_overrides", []),
             "agent_timeout": state.get("agent_timeout"),
             "validation_config": state.get("validation_config", self.validation.model_dump()),
             "validation_knowledge": state.get("validation_knowledge"),
@@ -1175,6 +1205,8 @@ class Harness(CheckRunner):
         return {**context, **extra}
 
     def _ask(self, state, role, **extra):
+        if extra.get("question") or extra.get("latest_user_message"):
+            state["_workflow_message"] = extra.get("question") or extra["latest_user_message"]
         context = self._context(state, role, **extra)
         if profile := state.get("agent_profiles", {}).get(role):
             context["agent_profile"] = profile
@@ -1282,8 +1314,16 @@ class Harness(CheckRunner):
             if state.get("selected_phase") == "interview" and state.get("exploration")
             else {}
         )
-        result = self._ask(state, "interviewer", **extra)
+        state["_workflow_message"] = state.get("_workflow_message") or next(
+            (m["text"] for m in reversed(state["messages"]) if m.get("text")), state["request"]
+        )
+        result = self._ask(
+            state, "interviewer", latest_user_message=state["_workflow_message"], **extra
+        )
         state["specification"] = result["specification"]
+        if result.get("workflow_action"):
+            self._workflow_action(state, result["workflow_action"])
+            return
         questions = result["questions"] or result["specification"]["open_questions"]
         state["messages"].append(
             interview_message(result["specification"], questions, state["seq"])
@@ -1379,6 +1419,9 @@ class Harness(CheckRunner):
         reports = Path(state["report_directory"])
         save_json(reports / "exploration.json", state["exploration"])
         (reports / "exploration.md").write_text(exploration_report(state))
+        if latest and result.get("workflow_action"):
+            self._workflow_action(state, result["workflow_action"])
+            return
         if latest and result.get("next_action") == "start_implementation":
             self._begin_implementation(state, latest)
             return
@@ -1506,6 +1549,12 @@ class Harness(CheckRunner):
         ):
             if self._clean_baseline(state):
                 actions.append("retarget_baseline")
+        if (
+            state.get("task_kind", "feature") == "feature"
+            and state["stage"] not in {"ready", "abandoning"}
+            and not state.get("checks_origin")
+        ):
+            actions.append("override_workflow")
         return actions
 
     def _task_instruction(self, state):
@@ -1542,6 +1591,9 @@ class Harness(CheckRunner):
         action = request["action"]
         if action not in (self._workflow_actions(state) if allowed is None else allowed):
             raise ValueError("That workflow action is unavailable at the current step")
+        if action == "override_workflow":
+            self._override_workflow(state, request)
+            return
         if action == "retarget_baseline":
             if not self._clean_baseline(state):
                 raise ValueError(
@@ -1676,7 +1728,11 @@ class Harness(CheckRunner):
             test_revision=state.get("test_revision"),
             workflow_actions=["retarget_baseline"] if self._clean_baseline(state) else [],
             specification_status=(
-                "developer_supplied" if state.get("task_kind") == "tests" else "approved"
+                "developer_supplied"
+                if state.get("task_kind") == "tests"
+                else "developer_directed"
+                if "requirements" in state.get("workflow_skips", [])
+                else "approved"
             ),
         )
         state.pop("test_revision", None)
@@ -1692,7 +1748,9 @@ class Harness(CheckRunner):
             )
             return
         criteria = {c["id"] for c in state["specification"]["acceptance_criteria"]}
-        if not all(proposal["coverage"].get(key) for key in criteria):
+        if "coverage" not in state.get("workflow_skips", []) and not all(
+            proposal["coverage"].get(key) for key in criteria
+        ):
             state["retry_node"] = "tests"
             state["rejected_test_proposal"] = proposal
             self._gate(
@@ -1738,14 +1796,22 @@ class Harness(CheckRunner):
             state, "implement" if role == "implementer" else "refactor"
         ):
             return
-        proposal = self._ask(state, role, specification_status="approved")
+        proposal = self._ask(
+            state,
+            role,
+            specification_status="developer_directed"
+            if "requirements" in state.get("workflow_skips", [])
+            else "approved",
+        )
         state["role"] = role
         self._accept_code(state, proposal)
 
     def _accept_code(self, state, proposal):
         self._assert_tests(state)
         blocked = self._test_changes(state, proposal)
-        if blocked or proposal.get("permission_request"):
+        if (blocked or proposal.get("permission_request")) and "patch_approval" not in state.get(
+            "workflow_skips", []
+        ):
             state["proposed_test_change"] = proposal
             self._gate(
                 state,
@@ -1758,7 +1824,9 @@ class Harness(CheckRunner):
                 ["approve_changes", "question", "revise_changes", "deny_changes"],
             )
             return
-        self._apply_code(state, proposal)
+        self._apply_code(
+            state, proposal, approved="patch_approval" in state.get("workflow_skips", [])
+        )
 
     def _apply_code(self, state, proposal, *, approved=False):
         workspace = self._workspace(state)
@@ -1774,7 +1842,13 @@ class Harness(CheckRunner):
             {
                 "kind": "work_update",
                 "agent_role": state["role"],
-                "answer": "Applied patch: " + proposal["summary"] + "\n\nRunning validation now.",
+                "answer": "Applied patch: "
+                + proposal["summary"]
+                + (
+                    "\n\nValidation skipped by your instruction."
+                    if "validation" in state.get("workflow_skips", [])
+                    else "\n\nRunning validation now."
+                ),
             }
         )
         state["phase"] = (
@@ -1813,7 +1887,11 @@ class Harness(CheckRunner):
         self._code(state, "refactorer")
 
     def _ensure_validation_knowledge(self, state, following):
-        detailed = following == "tests" or state.get("test_strategy") != "existing"
+        if "validation" in state.get("workflow_skips", []):
+            return True
+        detailed = (
+            following == "tests" or state.get("test_strategy") != "existing"
+        ) and "coverage" not in state.get("workflow_skips", [])
         if knowledge_is_current(
             self._workspace(state),
             state.get("validation_knowledge"),
@@ -2036,8 +2114,9 @@ class Harness(CheckRunner):
         }
         try:
             validation["test_evidence"] = test_evidence(results, allow_cabal=allow_cabal)
-            if state.get("task_kind") == "tests" or (
-                state.get("test_missing_implementation") and state["phase"] == "green"
+            if "coverage" not in state.get("workflow_skips", []) and (
+                state.get("task_kind") == "tests"
+                or (state.get("test_missing_implementation") and state["phase"] == "green")
             ):
                 covered = {name for names in state["coverage"].values() for name in names}
                 missing = covered - set(validation["test_evidence"]["identities"])
@@ -2150,7 +2229,7 @@ class Harness(CheckRunner):
             message = (
                 outcome["detail"] + "\n\n" + outcome["guidance"]
                 if state["next"] == "end"
-                else "No commit was created. Keeping validated changes in the task worktree "
+                else "No commit was created. Keeping changes in the task worktree "
                 "and continuing to the next step."
             )
             state["messages"].append(
@@ -2199,21 +2278,32 @@ class Harness(CheckRunner):
         saved = "left uncommitted" if state.get("commit_policy") == "manual" else "committed"
         if state["role"] == "test_author":
             state["approved_tests"] = workspace.test_manifest(state["test_paths"])
+            test_label = (
+                "Tests (approval skipped by request)"
+                if "test_approval" in state.get("workflow_skips", [])
+                else "Approved tests"
+            )
             state["attempts"], state["patch_count"], state["next"] = 0, 0, "implement"
             if state.get("task_kind") == "tests":
                 self._phase_complete(
-                    state, "tests_complete", f"Approved tests {saved}. Test task complete."
+                    state, "tests_complete", f"{test_label} {saved}. Test task complete."
                 )
             elif state["mode"] == "phased":
                 self._phase_complete(
-                    state, "tests_ready", f"Approved tests {saved}. Tests phase complete."
+                    state, "tests_ready", f"{test_label} {saved}. Tests phase complete."
                 )
         elif state["role"] == "implementer":
             if state["proposal"].get("complete", True):
                 state["attempts"], state["patch_count"], state["next"] = 0, 0, "refactor"
+                if "refactor" in state.get("workflow_skips", []):
+                    self._prepare_override_reviews(state)
                 if state["mode"] == "phased":
                     self._phase_complete(
-                        state, "implementation_ready", "Implementation complete and validated."
+                        state,
+                        "implementation_ready",
+                        "Implementation complete. Validation skipped by request."
+                        if "validation" in state.get("workflow_skips", [])
+                        else "Implementation complete and validated.",
                     )
             else:
                 self._more_patches(state, "implement")
@@ -2227,7 +2317,13 @@ class Harness(CheckRunner):
             state.pop("security_reviewer", None)
             state["next"] = "review_haskell"
             if state["mode"] == "phased":
-                self._phase_complete(state, "refactor_ready", "Refactoring complete and validated.")
+                self._phase_complete(
+                    state,
+                    "refactor_ready",
+                    "Refactoring complete. Validation skipped by request."
+                    if "validation" in state.get("workflow_skips", [])
+                    else "Refactoring complete and validated.",
+                )
 
     def _more_patches(self, state, next_node):
         state["patch_count"] = state.get("patch_count", 0) + 1
@@ -2362,6 +2458,7 @@ class Harness(CheckRunner):
     def _reply(self, state):
         response = state.pop("response")
         action, stage = response["action"], state["stage"]
+        state["_workflow_message"] = response.get("text", "")
         if "automatic" in response:
             state["mode"] = "full" if response["automatic"] else "phased"
         if action == "retry_longer":
@@ -2535,6 +2632,9 @@ class Harness(CheckRunner):
                     "suggested_commands": answer.get("suggested_commands", []),
                 }
             )
+            if answer.get("workflow_action"):
+                self._workflow_action(state, answer["workflow_action"])
+                return
             if proposal := answer.get("proposal"):
                 state["attempts"] = 0
                 self._accept_code(state, proposal)

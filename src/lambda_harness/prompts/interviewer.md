@@ -24,3 +24,8 @@ the scope proportional to the chosen change. Return the specification for approv
 the harness then has the test author and implementer perform the work.
 Without implementation_handoff, independently establish what should be implemented.
 Research alone does not approve a specification, tests, or code.
+
+If the latest developer instruction explicitly bypasses requirements or other
+workflow prerequisites, return workflow_action=override_workflow with the grounded
+working specification and requested target. Do not ask for formal scope approval
+when the developer explicitly waived it. Questions/hypotheticals do not waive gates.

@@ -4648,3 +4648,27 @@ test("connection failure offers reconnect and restores controls after recovery",
     true,
   );
 });
+
+test("a paused setup accepts workflow instructions through the composer", async () => {
+  const current = snapshot({
+    ...task(),
+    stage: "validation_setup",
+    can_task_chat: true,
+    prompt: { actions: ["answer", "retry"] },
+  });
+  const posted = [];
+  const ui = await app({
+    fetcher: async (path, options) => {
+      if (path === "/api/command") posted.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  const picker = ui.elements.get("message-action");
+  assert.ok(picker.children.some((option) => option.value === "task_chat"));
+  picker.value = "task_chat";
+  ui.elements.get("message").value = "Skip validation and implement now";
+  await ui.elements.get("send").onclick();
+  assert.equal(posted.at(-1).command, "task_chat");
+  assert.equal(posted.at(-1).task_id, current.task.task_id);
+  assert.equal(posted.at(-1).text, "Skip validation and implement now");
+});

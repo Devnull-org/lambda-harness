@@ -93,6 +93,8 @@ LOCAL_FIELDS = {
 }
 STATE_FIELDS = {
     "agent_timeout",
+    "workflow_skips",
+    "workflow_overrides",
     "baseline_plan",
     "baseline_resume",
     "baseline_resume_tests",
@@ -301,6 +303,18 @@ def _validate_state(state):
         raise ValueError("Invalid coding role")
     if state.get("phase") not in {None, "red", "green"}:
         raise ValueError("Invalid validation phase")
+    if "workflow_overrides" in state or "workflow_skips" in state:
+        from .schemas import WorkflowAction
+
+        overrides = state.get("workflow_overrides", [])
+        if not isinstance(overrides, list):
+            raise ValueError("Invalid workflow overrides")
+        for override in overrides:
+            if WorkflowAction.model_validate(override).action != "override_workflow":
+                raise ValueError("Invalid workflow override action")
+        expected = sorted({item for override in overrides for item in override["skip"]})
+        if state.get("workflow_skips") != expected:
+            raise ValueError("Workflow skips need their recorded developer instructions")
     if state.get("test_strategy") not in {None, "new", "existing"}:
         raise ValueError("Invalid test strategy")
     if state.get("checks_resume_boundary") not in {None, "tests_requested", "refactor_requested"}:
