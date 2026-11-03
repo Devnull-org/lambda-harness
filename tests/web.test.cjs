@@ -1640,6 +1640,15 @@ test("a failed poll retries and keeps the draft", async () => {
   });
   await ui.run("refresh()");
   assert.match(ui.elements.get("error").textContent, /retry/i);
+  assert.match(
+    ui.elements.get("history").textContent,
+    /Temporary connection failure/,
+  );
+  assert.ok(
+    descendants(ui.elements.get("history"), "button").some(
+      (b) => b.textContent === "Reconnect",
+    ),
+  );
   assert.equal(ui.elements.get("message").value, "Unsent draft");
   assert([...ui.timers.values()].some(({ delay }) => delay === 2000));
   ui.fetch(async () => response(snapshot()));
@@ -3344,9 +3353,96 @@ test("a delayed message submission cannot clear another task draft or show its e
   await sending;
   assert.equal(ui.elements.get("message").value, "Second task draft");
   assert.equal(ui.elements.get("error").hidden, true);
+  assert.doesNotMatch(
+    ui.elements.get("history").textContent,
+    /First task failed/,
+  );
   await ui.run('selectTask("example"); refresh()');
   assert.equal(ui.elements.get("message").value, "First task question");
   assert.match(ui.elements.get("error").textContent, /First task failed/);
+  assert.match(ui.elements.get("history").textContent, /First task failed/);
+  assert.match(
+    ui.elements.get("task-outcome").children[1].textContent,
+    /First task failed/,
+  );
+});
+
+test("job errors replace stale failure details beside the conversation and survive polling", async () => {
+  const current = snapshot({
+    ...task(),
+    outcome: { kind: "error", title: "Stopped", detail: "Old build failure" },
+  });
+  current.job = {
+    id: "chat-failed",
+    task_id: "example",
+    running: false,
+    error: "Agent context is too large\nFull diagnostic here",
+  };
+  const ui = await app({ fetcher: async () => response(current) });
+  for (let i = 0; i < 2; i++) {
+    assert.match(
+      ui.elements.get("history").textContent,
+      /Agent context is too large/,
+    );
+    assert.doesNotMatch(
+      ui.elements.get("history").textContent,
+      /Old build failure/,
+    );
+    assert.match(
+      ui.elements.get("task-outcome").children[1].textContent,
+      /Agent context is too large/,
+    );
+    assert.match(
+      ui.elements.get("response-progress-label").textContent,
+      /Agent context is too large/,
+    );
+    assert.equal(ui.elements.get("response-progress").dataset.kind, "error");
+    assert.ok(
+      descendants(ui.elements.get("history"), "button").some(
+        (b) => b.textContent === "Give instructions",
+      ),
+    );
+    await ui.run("refresh()");
+  }
+  assert.match(
+    ui.elements.get("task-outcome").textContent,
+    /Full diagnostic here/,
+  );
+  current.task = task("second");
+  await ui.run('selectTask("second"); refresh()');
+  assert.doesNotMatch(ui.elements.get("history").textContent, /Agent context/);
+  current.task = task();
+  current.job = { id: "retry", task_id: "example", running: true, log: [] };
+  await ui.run('selectTask("example"); refresh()');
+  assert.doesNotMatch(ui.elements.get("history").textContent, /Agent context/);
+  assert.match(
+    ui.elements.get("response-progress-label").textContent,
+    /Thinking/,
+  );
+});
+
+test("a rejected request immediately shows its reason without opening details", async () => {
+  const ui = await app();
+  ui.fetch(async (path) =>
+    path === "/api/command"
+      ? {
+          ok: false,
+          json: async () => ({ error: "Permission changed; reload the task" }),
+        }
+      : response(snapshot()),
+  );
+  await ui.run(
+    'guard(() => command({command: "task_chat", task_id: "example", text: "Implement"}))',
+  );
+  assert.match(ui.elements.get("history").textContent, /Permission changed/);
+  assert.match(
+    ui.elements.get("task-outcome").children[1].textContent,
+    /Permission changed/,
+  );
+  assert.match(
+    ui.elements.get("response-progress-label").textContent,
+    /Permission changed/,
+  );
 });
 
 function permissionControls(ui) {
@@ -4381,9 +4477,10 @@ test("compact status continues incomplete coverage and keeps details collapsed",
   assert.match(status.textContent, /proposal changed no files/);
   assert.match(status.textContent, /validation did not run/);
   assert.equal(status.children[0].textContent, "Test draft ready to continue");
-  assert.equal(status.children.length, 3);
-  assert.equal(status.children[2].tagName, "details");
-  assert.ok(!status.children[2].open);
+  assert.equal(status.children.length, 4);
+  assert.match(status.children[1].textContent, /Test mappings for 1 of 2/);
+  assert.equal(status.children[3].tagName, "details");
+  assert.ok(!status.children[3].open);
   assert.match(status.textContent, /A2Handle <boundary> safely/);
   assert.match(status.textContent, /test\/Example.hs/);
   const instructions = descendants(status, "button").find(
@@ -4643,7 +4740,8 @@ test("connection failure offers reconnect and restores controls after recovery",
   await ui.run("refresh()");
   const status = ui.elements.get("task-outcome");
   assert.equal(status.children[0].textContent, "Connection lost");
-  const controls = status.children[1];
+  assert.equal(status.children[1].textContent, "Offline");
+  const controls = status.children[2];
   assert.equal(controls.children[0].textContent, "Reconnect");
   assert.ok(!controls.children[0].disabled);
   assert.equal(

@@ -556,13 +556,19 @@ class Harness(WorkflowOverrides, CheckRunner):
                 result.pop("memory_note", None)
                 if generation := getattr(self.agent, "last_generation", None):
                     result["generation"] = copy.deepcopy(generation)
-            except (Exception, KeyboardInterrupt):
+            except (Exception, KeyboardInterrupt) as error:
+                interrupted = isinstance(error, (AgentInterrupted, KeyboardInterrupt))
                 messages.append(
                     {
                         "role": role,
                         "task_chat_message": turn + ":assistant",
-                        "answer": "This chat reply did not complete. "
-                        "Your workflow step is unchanged. You can send the question again.",
+                        "answer": (
+                            "This request was stopped."
+                            if interrupted
+                            else "This request failed: " + (str(error) or type(error).__name__)
+                        )
+                        + "\n\nYour workflow step is unchanged. "
+                        "You can retry or give new instructions.",
                         "references": [],
                     }
                 )

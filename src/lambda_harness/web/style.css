@@ -1790,6 +1790,10 @@ main {
 .response-progress[hidden] {
   display: none;
 }
+.response-progress[data-kind="error"] {
+  color: var(--red);
+  border-color: var(--red);
+}
 .lambda-orbit {
   position: relative;
   display: grid;

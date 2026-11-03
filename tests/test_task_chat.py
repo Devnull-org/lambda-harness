@@ -34,6 +34,25 @@ def test_pending_task_chat_keeps_role_context_without_copying_entire_history(rig
     assert unrelated in conversation_messages(harness._state("task"))
 
 
+def test_failed_task_chat_saves_actual_error_without_changing_pending_step(rig):
+    harness, _, _ = rig
+    harness.start("task", "Fix addOne")
+    before = copy.deepcopy(harness.graph.get_state(harness._config("task")))
+
+    def failing_agent(*args):
+        raise ValueError("Agent context is too large")
+
+    harness.agent = failing_agent
+    with pytest.raises(ValueError, match="context is too large"):
+        harness.task_chat("task", "Start implementation")
+    after = harness.graph.get_state(harness._config("task"))
+    assert after.values == before.values
+    assert after.next == before.next
+    reply = conversation_messages(harness._state("task"))[-1]["answer"]
+    assert "This request failed: Agent context is too large" in reply
+    assert "retry or give new instructions" in reply
+
+
 def test_task_chat_preserves_pending_approval_and_uses_changes_and_history(rig):
     harness, agent, executor = rig
     view = harness.start("task", "Fix addOne")

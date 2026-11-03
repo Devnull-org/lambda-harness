@@ -320,7 +320,10 @@ async function guard(action) {
     await action();
   } catch (e) {
     taskErrors.set(scope, e.message);
-    if (scope === taskScope()) error(e.message);
+    if (scope === taskScope()) {
+      error(e.message);
+      if (state) render();
+    }
   }
 }
 let renewingSession = null;
@@ -1588,18 +1591,50 @@ function baselineCard(task) {
   entry.append(controls);
   return entry;
 }
+function taskFailure(task) {
+  if (task.task_id !== selected) return null;
+  if (connectionError)
+    return {
+      kind: "paused",
+      title: "Connection lost",
+      detail: connectionError,
+      guidance: "Reconnecting to check the task status.",
+    };
+  const requestError = taskErrors.get(taskScope());
+  const jobError = !currentJob()?.running && currentJob()?.error;
+  if (requestError || jobError)
+    return {
+      kind: "error",
+      title: requestError ? "Request failed" : "Operation failed",
+      detail: requestError || jobError,
+      guidance: "Choose a recovery action or give new instructions.",
+    };
+  return !currentJob()?.running && task.outcome?.kind === "error"
+    ? task.outcome
+    : null;
+}
+function failureSummary(failure, limit = 240) {
+  const firstLine = (failure.detail || failure.title).trim().split("\n")[0];
+  return firstLine.length > limit
+    ? firstLine.slice(0, limit - 1) + "…"
+    : firstLine;
+}
 function failureCard(task) {
-  if (task.outcome?.kind !== "error" || currentJob()?.running) return null;
-  const timedOut = task.prompt?.backend_failure?.kind === "timeout";
+  const failure = taskFailure(task);
+  if (!failure) return null;
+  const timedOut =
+    failure === task.outcome &&
+    task.prompt?.backend_failure?.kind === "timeout";
   const entry = message(
-    "Harness · " + task.outcome.title,
+    "Harness · " + failure.title,
     timedOut
       ? "The agent did not return a result before its time limit. The earlier setup report is not an implementation result."
-      : (task.outcome.detail || "The operation stopped.").split("\n")[0],
+      : failureSummary(failure),
   );
   const controls = el("div", undefined, "button-row");
   const next = taskContinuation(task);
-  if (next) {
+  if (connectionError) controls.append(button("Reconnect", refresh, "primary"));
+  if (next && !connectionError && !currentJob()?.running) {
     const control = button(
       next.label,
       () => {
@@ -1610,9 +1645,10 @@ function failureCard(task) {
     control.disabled = submitting || !!connectionError || handoffBusy;
     controls.append(control);
   }
-  controls.append(
-    button("Give instructions", () => focusTaskInstructions(task), "quiet"),
-  );
+  if (!connectionError && !currentJob()?.running)
+    controls.append(
+      button("Give instructions", () => focusTaskInstructions(task), "quiet"),
+    );
   entry.append(controls);
   return entry;
 }
@@ -1623,15 +1659,17 @@ function scrollToLatestMessage() {
 function renderHistory(task) {
   const messages = task.messages || [];
   const progress = responseProgress(task.task_id);
+  const failure = taskFailure(task);
   const indicator = $("response-progress");
   indicator.hidden = task.task_id !== selected;
+  indicator.dataset.kind = failure && !progress ? failure.kind : "";
   indicator.dataset.active = String(
     !!progress && !connectionError && !currentJob()?.permission,
   );
   const idle = connectionError
     ? "Connection lost · reconnecting…"
-    : currentJob()?.error || task.outcome?.kind === "error"
-      ? "Stopped · action needed"
+    : failure
+      ? "Stopped · " + failureSummary(failure, 120)
       : task.outcome?.kind === "paused" || task.stage === "agent_paused"
         ? "Paused · waiting for instructions"
         : task.stage === "ready" || task.stage.endsWith("_complete")
@@ -1656,6 +1694,7 @@ function renderHistory(task) {
     pending,
     task.review_actions,
     task.outcome?.kind === "error" ? [task.outcome, task.prompt] : null,
+    failure,
     ["test_change_review", "baseline_review"].includes(task.stage)
       ? task.prompt
       : null,
@@ -1827,8 +1866,8 @@ function renderHistory(task) {
   if (permission) history.append(permission);
   const baseline = baselineCard(task);
   if (baseline) history.append(baseline);
-  const failure = failureCard(task);
-  if (failure) history.append(failure);
+  const failureEntry = failureCard(task);
+  if (failureEntry) history.append(failureEntry);
   if (atBottom || switched || pending?.status === "Sending…")
     scrollToLatestMessage();
 }
@@ -2014,16 +2053,9 @@ function renderCoverageGap(parent, task, gap) {
 
 function renderTask(task, running) {
   const working = task.task_id === selected && currentJob()?.running;
-  const operationError =
-    !currentJob()?.running &&
-    currentJob()?.task_id === task.task_id &&
-    currentJob().error;
+  const failure = taskFailure(task);
   const outcome = connectionError
-    ? {
-        kind: "paused",
-        title: "Connection lost",
-        detail: "Reconnecting to check the task status.",
-      }
+    ? failure
     : working
       ? {
           kind: "running",
@@ -2034,14 +2066,8 @@ function renderTask(task, running) {
               : "Working…",
           detail: currentJob().log?.at(-1) || "Starting the selected action…",
         }
-      : operationError
-        ? {
-            kind: "error",
-            title: "Operation failed",
-            detail: operationError,
-            guidance: "Review the error and choose an action to try again.",
-          }
-        : task.outcome || { kind: "waiting", title: stageLabel(task.stage) };
+      : failure ||
+        task.outcome || { kind: "waiting", title: stageLabel(task.stage) };
   const status = $("task-outcome");
   // Avoid repeated screen-reader announcements when polling an unchanged result.
   const outcomeKey = JSON.stringify([
@@ -2064,6 +2090,7 @@ function renderTask(task, running) {
           : outcome.title,
       ),
     );
+    if (failure && !working) status.append(prose(failureSummary(failure)));
     const controls = el("div", undefined, "button-row");
     const continuation = taskContinuation(task);
     if (connectionError)
