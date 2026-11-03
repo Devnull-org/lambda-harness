@@ -604,6 +604,21 @@
         </form>
       </section>
       <section id="work" hidden>
+        <div
+          id="response-progress"
+          class="response-progress"
+          role="status"
+          aria-live="polite"
+          hidden
+        >
+          <span class="lambda-orbit" aria-hidden="true">
+            <span class="lambda-core">λ</span>
+            <span class="lambda-spark"></span>
+            <span class="lambda-spark"></span>
+            <span class="lambda-spark"></span>
+          </span>
+          <span id="response-progress-label"></span>
+        </div>
         <div id="task-meta" class="metadata"></div>
         <div
           id="task-worktree"
@@ -661,21 +676,6 @@
           >
         </div>
         <section id="composer" hidden>
-          <div
-            id="response-progress"
-            class="response-progress"
-            role="status"
-            aria-live="polite"
-            hidden
-          >
-            <span class="lambda-orbit" aria-hidden="true">
-              <span class="lambda-core">λ</span>
-              <span class="lambda-spark"></span>
-              <span class="lambda-spark"></span>
-              <span class="lambda-spark"></span>
-            </span>
-            <span id="response-progress-label"></span>
-          </div>
           <div class="compose-top">
             <label id="composer-label" for="message">Your instructions</label
             ><button id="edit-previous" class="quiet" hidden>

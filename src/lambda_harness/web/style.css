@@ -1770,8 +1770,14 @@ main {
   font-size: 18px;
 }
 
-/* One persistent activity indicator, beside the conversation input. */
+/* One task status stays visible through long conversations and anchor jumps. */
 .response-progress {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+  padding-block: 8px;
   display: flex;
   align-items: center;
   gap: 14px;
@@ -1855,4 +1861,13 @@ main {
   .response-progress[data-active="true"] .lambda-core {
     animation: none;
   }
+}
+
+#response-progress-label {
+  overflow-wrap: anywhere;
+}
+#task-controls,
+#task-outcome,
+#composer {
+  scroll-margin-top: 88px;
 }

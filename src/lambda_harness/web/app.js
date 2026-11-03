@@ -1624,12 +1624,22 @@ function renderHistory(task) {
   const messages = task.messages || [];
   const progress = responseProgress(task.task_id);
   const indicator = $("response-progress");
-  indicator.hidden = !progress;
+  indicator.hidden = task.task_id !== selected;
   indicator.dataset.active = String(
     !!progress && !connectionError && !currentJob()?.permission,
   );
-  if ($("response-progress-label").textContent !== (progress || ""))
-    $("response-progress-label").textContent = progress || "";
+  const idle = connectionError
+    ? "Connection lost · reconnecting…"
+    : currentJob()?.error || task.outcome?.kind === "error"
+      ? "Stopped · action needed"
+      : task.outcome?.kind === "paused" || task.stage === "agent_paused"
+        ? "Paused · waiting for instructions"
+        : task.stage === "ready" || task.stage.endsWith("_complete")
+          ? "Complete"
+          : "Ready · waiting for instructions";
+  const label = `${task.task_id} · ${progress || idle}`;
+  if ($("response-progress-label").textContent !== label)
+    $("response-progress-label").textContent = label;
   if (
     pendingMessage?.task_id === task.task_id &&
     messages

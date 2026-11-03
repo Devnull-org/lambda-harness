@@ -1501,7 +1501,8 @@ test("a thinking indicator appears while sending and stays until the response fi
   current.stopping = false;
   current.task.messages.push({ role: "chat", answer: "The answer" });
   await ui.run("refresh()");
-  assert.equal(indicator().hidden, true);
+  assert.equal(indicator().hidden, false);
+  assert.equal(indicator().dataset.active, "false");
   assert.equal(ui.elements.has("activity-spinner"), false);
   assert.match(ui.elements.get("history").textContent, /The answer/);
 });
@@ -1618,13 +1619,16 @@ test("thinking status handles connection loss, other tasks, and backend errors",
   current.task = task("another");
   ui.run('selected = "another"');
   await ui.run("refresh()");
-  assert.equal(indicator().hidden, true);
+  assert.equal(indicator().hidden, false);
+  assert.equal(indicator().dataset.active, "false");
   current.task = task();
   current.job.running = false;
   current.job.error = "Usage limit";
   ui.run('selected = "example"');
   await ui.run("refresh()");
-  assert.equal(indicator().hidden, true);
+  assert.equal(indicator().hidden, false);
+  assert.equal(indicator().dataset.active, "false");
+  assert.match(progressText(), /Stopped/);
   assert.equal(ui.elements.has("activity-spinner"), false);
 });
 
