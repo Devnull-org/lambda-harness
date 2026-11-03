@@ -1474,14 +1474,14 @@ test("a thinking indicator appears while sending and stays until the response fi
       return response(current);
     },
   });
-  const indicator = () =>
-    ui.elements
-      .get("history")
-      .children.find((item) => item.className === "message response-progress");
+  const indicator = () => ui.elements.get("response-progress");
+  const progressText = () =>
+    ui.elements.get("response-progress-label").textContent;
   ui.elements.get("message").value = "What are the tradeoffs?";
   const pending = ui.run("respond('question')");
-  assert.match(indicator().textContent, /Sending/);
-  assert.equal(indicator().role, "status");
+  assert.match(progressText(), /Sending/);
+  assert.equal(indicator().hidden, false);
+  assert.equal(indicator().dataset.active, "true");
   current.job = {
     id: "working",
     task_id: "example",
@@ -1492,16 +1492,16 @@ test("a thinking indicator appears while sending and stays until the response fi
   current.can_stop = true;
   accept(response({}));
   await pending;
-  assert.match(indicator().textContent, /Thinking/);
+  assert.match(progressText(), /Thinking/);
   assert.equal(ui.elements.has("activity-spinner"), false);
   current.stopping = true;
   await ui.run("refresh()");
-  assert.match(indicator().textContent, /Stopping/);
+  assert.match(progressText(), /Stopping/);
   current.job.running = false;
   current.stopping = false;
   current.task.messages.push({ role: "chat", answer: "The answer" });
   await ui.run("refresh()");
-  assert.equal(indicator(), undefined);
+  assert.equal(indicator().hidden, true);
   assert.equal(ui.elements.has("activity-spinner"), false);
   assert.match(ui.elements.get("history").textContent, /The answer/);
 });
@@ -1541,7 +1541,7 @@ for (const kind of ["model", "validation"]) {
       kind === "model" ? /Stop model/ : /Stop checks/,
     );
     assert.match(
-      ui.elements.get("history").textContent,
+      ui.elements.get("response-progress-label").textContent,
       /Thinking|Running checks/,
     );
     ui.elements.get("message").value = "Keep my revised instructions";
@@ -1601,31 +1601,30 @@ test("thinking status handles connection loss, other tasks, and backend errors",
   };
   const ui = await app({ fetcher: async () => response(current) });
   ui.run("render()");
-  const indicator = () =>
-    ui.elements
-      .get("history")
-      .children.find((item) => item.className === "message response-progress");
-  assert.match(indicator().textContent, /Thinking/);
+  const indicator = () => ui.elements.get("response-progress");
+  const progressText = () =>
+    ui.elements.get("response-progress-label").textContent;
+  assert.match(progressText(), /Thinking/);
   ui.fetch(async () => {
     throw new Error("Connection failed");
   });
   await ui.run("refresh()");
-  assert.match(indicator().textContent, /Connection lost/);
-  assert.notEqual(indicator().children[0].className, "thinking-indicator");
+  assert.match(progressText(), /Connection lost/);
+  assert.equal(indicator().dataset.active, "false");
   assert.equal(ui.elements.has("activity-spinner"), false);
   ui.fetch(async () => response(current));
   await ui.run("refresh()");
-  assert.match(indicator().textContent, /Thinking/);
+  assert.match(progressText(), /Thinking/);
   current.task = task("another");
   ui.run('selected = "another"');
   await ui.run("refresh()");
-  assert.equal(indicator(), undefined);
+  assert.equal(indicator().hidden, true);
   current.task = task();
   current.job.running = false;
   current.job.error = "Usage limit";
   ui.run('selected = "example"');
   await ui.run("refresh()");
-  assert.equal(indicator(), undefined);
+  assert.equal(indicator().hidden, true);
   assert.equal(ui.elements.has("activity-spinner"), false);
 });
 
@@ -3449,8 +3448,10 @@ test("activity logs remain available below chat without a floating panel or dupl
       .get("history")
       .children.filter((n) => n.className === "message response-progress")
       .length,
-    1,
+    0,
   );
+  assert.equal(ui.elements.get("response-progress").hidden, false);
+  assert.equal(ui.elements.get("response-progress").dataset.active, "true");
 });
 
 function runtimeControls(ui) {
@@ -4671,4 +4672,31 @@ test("a paused setup accepts workflow instructions through the composer", async 
   assert.equal(posted.at(-1).command, "task_chat");
   assert.equal(posted.at(-1).task_id, current.task.task_id);
   assert.equal(posted.at(-1).text, "Skip validation and implement now");
+});
+
+test("work launched from this task keeps its composer indicator visible", async () => {
+  const current = snapshot();
+  current.job = {
+    id: "checks-job",
+    task_id: "checks-worker",
+    origin_task_id: "example",
+    running: true,
+    log: [],
+  };
+  current.activity_kind = "validation";
+  current.can_stop = true;
+  const ui = await app({ fetcher: async () => response(current) });
+  assert.equal(ui.elements.get("response-progress").hidden, false);
+  assert.match(
+    ui.elements.get("response-progress-label").textContent,
+    /Running checks/,
+  );
+  assert.equal(ui.elements.get("composer-stop").hidden, false);
+  current.job.permission = { id: "permission", request: {} };
+  await ui.run("render()");
+  assert.equal(ui.elements.get("response-progress").dataset.active, "false");
+  assert.match(
+    ui.elements.get("response-progress-label").textContent,
+    /Waiting for your permission/,
+  );
 });

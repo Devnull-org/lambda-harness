@@ -1273,8 +1273,9 @@ function render() {
   renderMemory(projectBusy);
   renderModelPicker();
   if (state.task?.task_id === selected) renderTask(state.task, busy);
+  else $("response-progress").hidden = true;
   $("activity-log").hidden = !currentJob()?.log?.length;
-  $("composer-stop").hidden = !running || currentJob().task_id !== selected;
+  $("composer-stop").hidden = !running;
   $("composer-stop").disabled =
     !state.can_stop || stopPending() || !!connectionError;
   $("composer-stop").textContent =
@@ -1335,7 +1336,7 @@ function render() {
 }
 function responseProgress(taskId) {
   const sending = submitting && pendingMessage?.task_id === taskId;
-  const working = currentJob()?.running && currentJob().task_id === taskId;
+  const working = taskId === selected && currentJob()?.running;
   if (!sending && !working) return null;
   if (connectionError) return "Connection lost · reconnecting…";
   if (state.stopping || stopPending()) return "Stopping…";
@@ -1621,6 +1622,13 @@ function scrollToLatestMessage() {
 function renderHistory(task) {
   const messages = task.messages || [];
   const progress = responseProgress(task.task_id);
+  const indicator = $("response-progress");
+  indicator.hidden = !progress;
+  indicator.dataset.active = String(
+    !!progress && !connectionError && !currentJob()?.permission,
+  );
+  if ($("response-progress-label").textContent !== (progress || ""))
+    $("response-progress-label").textContent = progress || "";
   if (
     pendingMessage?.task_id === task.task_id &&
     messages
@@ -1810,21 +1818,6 @@ function renderHistory(task) {
   if (baseline) history.append(baseline);
   const failure = failureCard(task);
   if (failure) history.append(failure);
-  if (progress) {
-    const entry = el("div", undefined, "message response-progress");
-    entry.role = "status";
-    entry.ariaLive = "polite";
-    entry.append(
-      el(
-        "span",
-        progress,
-        connectionError || currentJob()?.permission
-          ? "muted"
-          : "thinking-indicator",
-      ),
-    );
-    history.append(entry);
-  }
   if (atBottom || switched || pending?.status === "Sending…")
     scrollToLatestMessage();
 }
@@ -2005,8 +1998,7 @@ function renderCoverageGap(parent, task, gap) {
 }
 
 function renderTask(task, running) {
-  const working =
-    currentJob()?.running && currentJob().task_id === task.task_id;
+  const working = task.task_id === selected && currentJob()?.running;
   const operationError =
     !currentJob()?.running &&
     currentJob()?.task_id === task.task_id &&
@@ -2398,7 +2390,8 @@ function renderTask(task, running) {
       $("findings").append(label);
     }
   }
-  $("composer").hidden = !messageActions.length && !running;
+  $("composer").hidden =
+    !messageActions.length && !running && !responseProgress(task.task_id);
   const chatting = task.stage === "chat";
   $("composer-label").textContent = chatting ? "Message" : "Message the agent";
   $("message").placeholder = chatting

@@ -1309,8 +1309,7 @@ main > header {
   overflow-y: auto;
   white-space: pre-wrap;
 }
-.transfer-busy::before,
-.thinking-indicator::before {
+.transfer-busy::before {
   content: "";
   display: inline-block;
   width: 0.8em;
@@ -1327,8 +1326,7 @@ main > header {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .transfer-busy::before,
-  .thinking-indicator::before {
+  .transfer-busy::before {
     animation: none;
   }
 }
@@ -1770,4 +1768,91 @@ main {
 .back-to-top span {
   margin-right: 4px;
   font-size: 18px;
+}
+
+/* One persistent activity indicator, beside the conversation input. */
+.response-progress {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  min-height: 48px;
+  margin-bottom: 12px;
+  color: var(--accent);
+  font-size: 0.9rem;
+  font-weight: 550;
+}
+.response-progress[hidden] {
+  display: none;
+}
+.lambda-orbit {
+  position: relative;
+  display: grid;
+  place-items: center;
+  flex: 0 0 44px;
+  width: 44px;
+  height: 44px;
+}
+.lambda-core {
+  font-family: var(--font-mono);
+  font-size: 26px;
+  font-weight: 600;
+  line-height: 1;
+}
+.lambda-spark {
+  position: absolute;
+  left: 19px;
+  top: 19px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  color: var(--accent);
+  transform: rotate(0deg) translateX(20px);
+}
+.lambda-spark:nth-child(3) {
+  color: var(--success);
+  transform: rotate(120deg) translateX(20px);
+  animation-delay: -1.6s;
+}
+.lambda-spark:nth-child(4) {
+  color: var(--warm);
+  transform: rotate(240deg) translateX(20px);
+  animation-delay: -0.8s;
+}
+.response-progress[data-active="true"] .lambda-spark {
+  animation-name: lambda-orbit;
+  animation-duration: 2.4s;
+  animation-timing-function: linear;
+  animation-iteration-count: infinite;
+}
+.response-progress[data-active="true"] .lambda-core {
+  animation: lambda-breathe 2.4s ease-in-out infinite;
+}
+.response-progress[data-active="false"] {
+  color: var(--muted);
+}
+@keyframes lambda-orbit {
+  from {
+    transform: rotate(0deg) translateX(20px);
+  }
+  to {
+    transform: rotate(360deg) translateX(20px);
+  }
+}
+@keyframes lambda-breathe {
+  0%,
+  100% {
+    opacity: 0.65;
+    transform: scale(0.94);
+  }
+  50% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .response-progress[data-active="true"] .lambda-spark,
+  .response-progress[data-active="true"] .lambda-core {
+    animation: none;
+  }
 }
