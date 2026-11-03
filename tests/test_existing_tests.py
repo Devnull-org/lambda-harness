@@ -269,61 +269,18 @@ def test_saved_blocked_patch_can_continue_coding_after_explanation(rig, reposito
     assert len(executor.calls) == 8
 
 
-def test_incomplete_test_proposal_exposes_evidence_without_applying_it(rig):
-    import copy
+def test_legacy_incomplete_test_proposal_can_still_be_revised(rig):
+    from .test_feature_drafts import draft, legacy_draft, partial_scope
 
-    from .conftest import FAILURE_ID, SPECIFICATION
-
-    harness, agent, executor = rig
-    scope = copy.deepcopy(SPECIFICATION)
-    scope["acceptance_criteria"].append({"id": "A2", "description": "Handle the boundary case"})
-    agent.responses["interviewer"].append({"specification": scope, "questions": []})
-    approved = specification(harness)
-    worktree = Path(approved["worktree"])
-    original = (worktree / TEST).read_text()
-    agent.responses["test_author"].append(
-        {
-            "summary": "Partial proposal; boundary coverage still missing.",
-            "changes": [{"path": TEST, "content": TEST_CONTENT + "-- proposed only\n"}],
-            "expected_failures": [FAILURE_ID],
-            "coverage": {"A1": [FAILURE_ID], "A2": []},
-            "commit_message": "test: partial coverage",
-        }
-    )
-    view = harness.run_phase("task", "tests", automatic=True)
-    assert view["stage"] == "agent_error"
-    assert view["outcome"]["title"] == "Test proposal incomplete"
-    assert "1 of 2" in view["outcome"]["detail"]
-    gap = view["outcome"]["coverage_gap"]
-    assert gap["missing"] == [scope["acceptance_criteria"][1]]
-    assert gap["files"] == [TEST]
-    assert gap["summary"] == "Partial proposal; boundary coverage still missing."
-    assert view["outcome"]["step"] == "tests"
-    assert (worktree / TEST).read_text() == original
-    assert executor.calls == []
-    assert "question" in view["prompt"]["actions"]
-    assert "choose_phase" in view["prompt"]["actions"]
-
-    # Previously saved failures recover the same evidence from their saved proposal.
-    legacy = copy.deepcopy(harness._state("task"))
-    del legacy["prompt"]["coverage_gap"]
-    del legacy["rejected_test_proposal"]
-    assert harness._view(legacy)["outcome"]["coverage_gap"] == gap
-    assert "coverage_gap" not in legacy["prompt"]
-
+    harness, agent, _ = rig
+    view = legacy_draft(harness, agent)
+    assert view["outcome"]["title"] == "Test draft ready to continue"
     assert "revise_tests" in view["prompt"]["actions"]
-    agent.responses["test_author"].append(
-        {
-            "summary": "Revised test proposal",
-            "changes": [{"path": TEST, "content": TEST_CONTENT}],
-            "expected_failures": [FAILURE_ID],
-            "coverage": {"A1": [FAILURE_ID], "A2": [FAILURE_ID]},
-            "commit_message": "test: complete coverage",
-        }
-    )
+    agent.responses["test_author"].append(draft())
     continued = harness.respond("task", "revise_tests", automatic=True)
     context = agent.calls[-1][1]
-    assert context["test_revision"]["missing_criteria"] == gap["missing"]
-    assert context["test_revision"]["previous_proposal"]["summary"] == gap["summary"]
+    assert context["test_revision"]["missing_criteria"] == [
+        partial_scope()["acceptance_criteria"][1]
+    ]
     assert continued["stage"] == "test_review"
     assert not any(role == "implementer" for role, _, _ in agent.calls)

@@ -622,6 +622,7 @@ class Harness(WorkflowOverrides, CheckRunner):
                 "revise_changes",
                 "deny_changes",
                 "continue_without_commits",
+                "continue_tests",
                 "run_checks",
                 "revalidate_changes",
             }:
@@ -970,6 +971,16 @@ class Harness(WorkflowOverrides, CheckRunner):
                 "to revisit the scope. Retry unchanged sends the same instructions again.",
                 coverage_gap=gap,
             )
+            if "continue_tests" in prompt.get("actions", []):
+                outcome.update(
+                    kind="waiting",
+                    title="Test draft ready to continue",
+                    detail="The saved test draft can continue. Requirements without named tests "
+                    "remain in scope for implementation and review.",
+                    guidance="Continue applies and checks the saved draft "
+                    "without repeating research. "
+                    "Test approval still precedes coding.",
+                )
         return outcome
 
     @staticmethod
@@ -1169,6 +1180,7 @@ class Harness(WorkflowOverrides, CheckRunner):
             "base_revision": state["base"],
             "approved_tests": state.get("approved_tests", {}),
             "missing_implementation": state.get("test_missing_implementation", []),
+            "criteria_without_tests": state.get("test_coverage_gap", {}).get("missing", []),
             "workflow_actions": self._workflow_actions(state),
             "workflow_skips": state.get("workflow_skips", []),
             "workflow_instructions": state.get("workflow_overrides", []),
@@ -1722,7 +1734,12 @@ class Harness(WorkflowOverrides, CheckRunner):
             return
         # Reaching this node means the feature specification was approved, or the
         # developer supplied a standalone test scope. Draft prose is not a gate.
-        proposal = self._ask(
+        saved_draft = state.get("resume_test_proposal")
+        if saved_draft:
+            saved_draft = validate_response(
+                "test_author", self._context(state, "test_author"), saved_draft
+            )
+        proposal = saved_draft or self._ask(
             state,
             "test_author",
             test_revision=state.get("test_revision"),
@@ -1748,8 +1765,10 @@ class Harness(WorkflowOverrides, CheckRunner):
             )
             return
         criteria = {c["id"] for c in state["specification"]["acceptance_criteria"]}
-        if "coverage" not in state.get("workflow_skips", []) and not all(
-            proposal["coverage"].get(key) for key in criteria
+        if (
+            state.get("task_kind") == "tests"
+            and "coverage" not in state.get("workflow_skips", [])
+            and not all(proposal["coverage"].get(key) for key in criteria)
         ):
             state["retry_node"] = "tests"
             state["rejected_test_proposal"] = proposal
@@ -1764,6 +1783,19 @@ class Harness(WorkflowOverrides, CheckRunner):
             )
             return
         self._workspace(state).apply(proposal["changes"], tests_only=True)
+        state["test_coverage_gap"] = coverage_gap(state["specification"], proposal)
+        if state["test_coverage_gap"]["missing"]:
+            state["messages"].append(
+                {
+                    "kind": "work_update",
+                    "agent_role": "test_author",
+                    "answer": "Test draft applied. Requirements without named tests "
+                    "remain in scope "
+                    "for implementation and review.",
+                }
+            )
+        state.pop("rejected_test_proposal", None)
+        state.pop("resume_test_proposal", None)
         state["test_strategy"] = "new"
         state["test_paths"] = sorted(
             set(state.get("test_paths", [])) | {c["path"] for c in proposal["changes"]}
@@ -2202,6 +2234,7 @@ class Harness(WorkflowOverrides, CheckRunner):
                     "summary": state["proposal"]["summary"],
                     "diff": self._workspace(state).diff(),
                     "coverage": state["coverage"],
+                    "criteria_without_tests": state.get("test_coverage_gap", {}).get("missing", []),
                     "validation": state["validation"],
                 },
                 ["approve", "question", "revise", "recheck"],
@@ -2439,6 +2472,26 @@ class Harness(WorkflowOverrides, CheckRunner):
         state["phase_fingerprint"] = self._workspace(state).fingerprint()
         state["next"] = "end"
 
+    def _continue_tests(self, state):
+        if "continue_tests" not in recovery_actions(state):
+            raise ValueError("There is no saved feature test draft to continue")
+        if self._workspace(state).fingerprint() != state["gate_fingerprint"]:
+            raise ValueError("Worktree changed since the test draft; inspect it before continuing")
+        proposal = validate_response(
+            "test_author", self._context(state, "test_author"), saved_test_proposal(state)
+        )
+        if not proposal.get("changes") or proposal.get("workflow_action"):
+            raise ValueError("The saved proposal is not a test patch")
+        state["resume_test_proposal"] = proposal
+        state["next"] = "tests"
+        state["messages"].append(
+            {
+                "agent_role": "test_author",
+                "answer": "Continuing with the saved test draft. The full specification remains "
+                "in scope; no requirement is waived.",
+            }
+        )
+
     def _retry_longer(self, state):
         timeout = recovery_prompt(state)["retry_timeout_seconds"]
         node = state["retry_node"]
@@ -2461,7 +2514,9 @@ class Harness(WorkflowOverrides, CheckRunner):
         state["_workflow_message"] = response.get("text", "")
         if "automatic" in response:
             state["mode"] = "full" if response["automatic"] else "phased"
-        if action == "retry_longer":
+        if action == "continue_tests":
+            self._continue_tests(state)
+        elif action == "retry_longer":
             self._retry_longer(state)
         elif action == "approve_baseline":
             self._apply_baseline(state)
@@ -2663,7 +2718,14 @@ class Harness(WorkflowOverrides, CheckRunner):
                 recovery_actions=[
                     a
                     for a in recovery_actions(state)
-                    if a in {"retry", "retry_longer", "recheck", "continue_without_commits"}
+                    if a
+                    in {
+                        "retry",
+                        "retry_longer",
+                        "recheck",
+                        "continue_without_commits",
+                        "continue_tests",
+                    }
                 ],
             )
             chosen = answer.get("next_action")
@@ -2679,7 +2741,9 @@ class Harness(WorkflowOverrides, CheckRunner):
             if answer.get("workflow_action"):
                 self._workflow_action(state, answer["workflow_action"])
                 return
-            if chosen == "retry_longer":
+            if chosen == "continue_tests":
+                self._continue_tests(state)
+            elif chosen == "retry_longer":
                 self._retry_longer(state)
             elif chosen == "continue_without_commits":
                 self._continue_without_commits(state)

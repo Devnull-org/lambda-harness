@@ -34,3 +34,9 @@ When workflow_skips contains requirements or test_writing, implement the supplie
 working scope and workflow_instructions directly. Do not demand skipped approvals
 or a test-author handoff. Validation and patch permissions apply unless separately
 skipped by an explicit developer instruction recorded in workflow_skips.
+
+When criteria_without_tests is present, complete those requirements as well as the
+behavior covered by the initial tests. For example, update a required specification
+or formal model and use the repository's relevant checks. Add meaningful coverage
+where appropriate, requesting patch permission when needed. complete=true means the
+whole accepted scope is implemented, not merely that the initial tests pass.

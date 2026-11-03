@@ -590,6 +590,13 @@
           package's tests inside the target's Nix environment.
         </p>
         <p>
+          Feature test drafts can cover part of the accepted scope. Requirements
+          without named tests stay visible for implementation and review; they
+          do not force another research or test-generation loop. Specification,
+          documentation and formal-model work can use appropriate checks instead
+          of invented test names. Test approval and validation still apply.
+        </p>
+        <p>
           Failing assertions are expected during the test-first phase. Feature
           tests may also declare production APIs that do not exist yet. These
           drafts can be reviewed before they compile; approval hands them to the

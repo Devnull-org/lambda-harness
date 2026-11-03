@@ -65,6 +65,8 @@ def recovery_actions(state):
         actions.append("retry_longer")
     if can_recover(state) and saved_coverage_gap(state):
         actions.append("revise_tests")
+        if state.get("task_kind", "feature") == "feature" and saved_test_proposal(state):
+            actions.append("continue_tests")
     if commit_failed(state):
         actions.append("continue_without_commits")
     return list(dict.fromkeys(actions))

@@ -264,7 +264,8 @@ const labels = {
   revise: "Revise instructions",
   approve: "Approve",
   retry: "Retry unchanged",
-  revise_tests: "Complete missing test coverage",
+  revise_tests: "Revise test draft",
+  continue_tests: "Continue with saved tests",
   recheck: "Run checks again",
   reject: "Reject changes",
   skip: "Skip",
@@ -1910,6 +1911,7 @@ function taskContinuation(task) {
         : { command: "run", task_id: task.task_id, phase: "implement" },
     };
   for (const action of [
+    "continue_tests",
     "revise_tests",
     "repair",
     "approve_changes",
@@ -1977,7 +1979,10 @@ function renderCoverageGap(parent, task, gap) {
   );
   const missing = el("details", undefined, "status-evidence");
   missing.append(
-    el("summary", `${gap.missing.length} criteria need named tests`),
+    el(
+      "summary",
+      `${gap.missing.length} requirements need further verification`,
+    ),
   );
   const list = el("ul");
   for (const criterion of gap.missing) {
@@ -2044,7 +2049,7 @@ function renderTask(task, running) {
     status.replaceChildren(
       el(
         "h2",
-        gap
+        gap && !task.prompt?.actions?.includes("continue_tests")
           ? `Paused · ${gap.missing.length} ${gap.missing.length === 1 ? "criterion needs" : "criteria need"} tests`
           : outcome.title,
       ),
@@ -2317,6 +2322,14 @@ function renderTask(task, running) {
         ),
       );
     }
+    if (prompt.criteria_without_tests?.length)
+      section(
+        packet,
+        "Requirements carried into implementation",
+        prompt.criteria_without_tests
+          .map((item) => `${item.id}: ${item.description}`)
+          .join("\n"),
+      );
     if (prompt.coverage)
       section(
         packet,

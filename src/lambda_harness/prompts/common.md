@@ -194,3 +194,15 @@ of correctness. File boundaries and truthful reporting still apply.
 
 specification_status=developer_directed means the developer explicitly skipped formal
 requirements approval. Use the supplied scope and workflow_instructions to code now.
+
+criteria_without_tests lists requirements not mapped to named tests in the initial
+test draft. They remain part of the accepted specification, not scope exceptions.
+Implementers must address them using appropriate code, tests, documentation or formal
+model changes. Request permission for any necessary test/configuration changes.
+Reviewers must assess their implementation and appropriate verification evidence;
+passing the mapped tests alone does not establish completion. Do not demand every
+requirement have a unit test before implementation can begin.
+During recovery, continue_tests applies the saved feature test draft and runs its
+validation without repeating research or generation. Prefer it over retry/revise_tests
+when the developer asks to continue the saved test-first work after a coverage gap.
+It does not approve the test patch, waive requirements, or bypass validation.

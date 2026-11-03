@@ -4336,10 +4336,18 @@ test("compact status continues incomplete coverage and keeps details collapsed",
     ...task(),
     mode: "full",
     stage: "agent_error",
-    prompt: { actions: ["question", "retry", "revise_tests", "choose_phase"] },
+    prompt: {
+      actions: [
+        "question",
+        "retry",
+        "revise_tests",
+        "continue_tests",
+        "choose_phase",
+      ],
+    },
     outcome: {
       kind: "error",
-      title: "Test proposal incomplete",
+      title: "Test draft ready to continue",
       step: "tests",
       detail: "Test mappings for 1 of 2 acceptance criteria.",
       coverage_gap: {
@@ -4368,10 +4376,7 @@ test("compact status continues incomplete coverage and keeps details collapsed",
   assert.match(status.textContent, /Stopped during: tests/);
   assert.match(status.textContent, /proposal changed no files/);
   assert.match(status.textContent, /validation did not run/);
-  assert.equal(
-    status.children[0].textContent,
-    "Paused · 1 criterion needs tests",
-  );
+  assert.equal(status.children[0].textContent, "Test draft ready to continue");
   assert.equal(status.children.length, 3);
   assert.equal(status.children[2].tagName, "details");
   assert.ok(!status.children[2].open);
@@ -4394,7 +4399,7 @@ test("compact status continues incomplete coverage and keeps details collapsed",
   await next.onclick();
   assert.equal(commands.length, 1);
   assert.equal(commands[0].command, "respond");
-  assert.equal(commands[0].action, "revise_tests");
+  assert.equal(commands[0].action, "continue_tests");
   assert.equal(commands[0].task_id, "example");
   assert.equal(commands[0].automatic, true);
   const log = descendants(status, "button").find(

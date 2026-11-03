@@ -115,6 +115,16 @@ def pr_description(state):
     lines += [f"- {item['id']}: {item['description']}" for item in spec["acceptance_criteria"]]
     if spec["assumptions"]:
         lines += ["", "Assumptions", "", *[f"- {item}" for item in spec["assumptions"]]]
+    if missing := state.get("test_coverage_gap", {}).get("missing", []):
+        lines += [
+            "",
+            "Requirements without a named test in the initial draft",
+            "",
+            "These remain in scope. Assess their implementation and other verification "
+            "evidence; passing the mapped tests alone does not establish completion.",
+            "",
+        ]
+        lines += [f"- {item['id']}: {item['description']}" for item in missing]
     lines += ["", "Local patch series", ""]
     for patch in state["commits"]:
         lines.append(

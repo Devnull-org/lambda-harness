@@ -154,17 +154,9 @@ def test_skip_test_approval_preserves_red_then_green_flow(rig):
 
 def test_recovery_question_can_bypass_incomplete_test_coverage(rig):
     h, agent, _ = rig
-    approved(h)
-    agent.responses["test_author"].append(
-        {
-            "summary": "Draft tests",
-            "changes": [{"path": TEST, "content": "-- draft test\n"}],
-            "coverage": {},
-            "expected_failures": ["missing test"],
-            "commit_message": "test: draft",
-        }
-    )
-    assert h.run_phase("task", "tests")["stage"] == "agent_error"
+    from .test_feature_drafts import legacy_draft
+
+    legacy_draft(h, agent)
     text = "Skip test writing and implement now"
     agent.responses["test_author"].append(override(text))
     view = h.respond("task", "question", text=text)
