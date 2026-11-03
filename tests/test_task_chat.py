@@ -4,6 +4,7 @@ import copy
 
 import pytest
 
+from lambda_harness.backends import prompt_for
 from lambda_harness.conversation import conversation_messages
 from lambda_harness.failures import AgentInterrupted
 from lambda_harness.workflow import Harness
@@ -11,6 +12,26 @@ from lambda_harness.workspace import Workspace
 
 from .conftest import SOURCE
 from .test_phases import specification
+
+
+def test_pending_task_chat_keeps_role_context_without_copying_entire_history(rig):
+    harness, agent, _ = rig
+    harness.start("task", "Fix addOne")
+    config = harness._config("task")
+    saved = harness._state("task")
+    unrelated = {"role": "explorer", "analysis": "old discovery " * 50_000}
+    saved["messages"].append(unrelated)
+    harness.graph.update_state(config, saved)
+    agent.responses["interviewer"].append({"answer": "Ready to continue"})
+
+    harness.task_chat("task", "Explain the current task")
+
+    context = agent.calls[-1][1]
+    prompt, _ = prompt_for("interviewer", context)
+    assert len(prompt.encode()) < 500_000
+    assert unrelated not in context["messages"]
+    assert context["messages"][-1]["text"] == "Explain the current task"
+    assert unrelated in conversation_messages(harness._state("task"))
 
 
 def test_task_chat_preserves_pending_approval_and_uses_changes_and_history(rig):

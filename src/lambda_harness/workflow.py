@@ -546,7 +546,6 @@ class Harness(WorkflowOverrides, CheckRunner):
                     **({"intent": "explain", "question": text} if role != "chat" else {}),
                     task_chat_turn=turn,
                     latest_user_message=text,
-                    messages=state["messages"],
                     task_stage=state["stage"],
                     workflow_status=workflow_status,
                     workflow_actions=self._workflow_actions(state),
