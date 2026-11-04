@@ -6,6 +6,7 @@ import shlex
 from pathlib import Path
 
 from .process import ProcessError
+from .schemas import CheckPlan
 from .validation import ValidationInterrupted
 from .validation_discovery import project_inventory, source_hashes, validation_environment
 from .workspace import save_json
@@ -60,6 +61,9 @@ class CheckRunner:
             previous_check_plan=state.get("check_plan"),
             previous_check_results=state.get("check_results"),
         )
+        # Older cached plans may omit optional fields. Materialize schema defaults
+        # before the runner reads them, just as for a newly returned plan.
+        plan = CheckPlan.model_validate(plan).model_dump()
         source_hashes(workspace, [{"path": name} for name in plan["sources"]])
         for command in plan["commands"]:
             directory = workspace.safe_path(command["directory"])

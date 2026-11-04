@@ -118,6 +118,28 @@ def test_unchanged_checks_restore_original_phase(rig):
     assert harness.run_phase("task", "review-haskell")["stage"] == "reviews_ready"
 
 
+def test_cached_plan_without_optional_questions_resumes_without_regenerating(rig):
+    from lambda_harness.workspace import save_json
+
+    harness, agent, _ = rig
+    refactored(harness)
+    state = harness._state("task")
+    proposed = plan()
+    proposed.pop("questions")
+    proposed.pop("omissions")
+    save_json(
+        Path(state["directory"]) / "proposals" / f"{state['seq']:04d}-test_runner.json",
+        proposed,
+    )
+    count = len(agent.calls)
+    view = harness.run_task_checks("task")
+    assert view["stage"] == "checks_plan", view["prompt"]
+    assert view["check_plan"]["questions"] == []
+    assert view["check_plan"]["omissions"] == []
+    assert "run_checks" in view["prompt"]["actions"]
+    assert len(agent.calls) == count
+
+
 def test_stopped_run_records_unrun_suites_and_can_be_rerun(rig):
     harness, _, _ = rig
     executor = CheckExecutor(stop=True)

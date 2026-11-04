@@ -43,6 +43,55 @@ def test_skip_test_writing_from_requested_phase_runs_implementation_and_checks(r
     )
 
 
+def test_implementation_instruction_can_leave_task_check_planning(rig):
+    from .test_check_runner import plan
+
+    h, agent, execute = rig
+    approved(h)
+    state = h._state("task")
+    state["approved_tests"] = h._workspace(state).test_manifest()
+    h._phase_complete(state, "tests_requested", "Write tests next")
+    h.graph.update_state(h._config("task"), state, as_node="finish")
+    agent.responses["test_runner"].append(plan())
+    view = h.run_task_checks("task")
+    assert view["stage"] == "checks_plan"
+    original_tests = h._state("task").get("approved_tests")
+    text = "Leave check planning, skip test writing and implement now; run checks afterwards"
+    agent.responses["test_runner"].append(override(text))
+    view = h.task_chat("task", text)
+    state = h._state("task")
+    assert view["stage"] == "implementation_ready", view["prompt"]
+    assert not state.get("checks_origin")
+    assert state["check_plan"]["commands"] == plan()["commands"]
+    assert "override_workflow" in agent.calls[-2][1]["workflow_actions"]
+    assert state["workflow_skips"] == ["test_writing"]
+    assert state["approved_tests"] == original_tests
+    assert state["validation"]["status"] == "green" and execute.calls
+    assert (Path(view["worktree"]) / SOURCE).read_text() == IMPLEMENTED
+
+
+def test_rejected_handoff_is_saved_in_chat_and_keeps_check_session(rig):
+    from lambda_harness.conversation import conversation_messages
+
+    from .test_check_runner import plan
+
+    h, agent, execute = rig
+    approved(h)
+    agent.responses["test_runner"].append(plan())
+    view = h.run_task_checks("task")
+    path = Path(view["worktree"]) / SOURCE
+    path.write_text("-- edited outside the task\n")
+    text = "Skip test writing and implement now"
+    agent.responses["test_runner"].append(override(text))
+    with pytest.raises(ValueError, match="Worktree changed"):
+        h.task_chat("task", text)
+    state = h._state("task")
+    assert state["checks_origin"] and state["stage"] == "checks_plan"
+    assert "workflow_skips" not in state
+    assert not execute.calls
+    assert "This request failed: Worktree changed" in conversation_messages(state)[-1]["answer"]
+
+
 @pytest.mark.parametrize("channel", ["question", "task_chat"])
 def test_bypass_pending_scope_gate_keeps_tests_and_records_unverified_work(rig, channel):
     h, agent, execute = rig

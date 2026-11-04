@@ -556,32 +556,31 @@ class Harness(WorkflowOverrides, CheckRunner):
                 result.pop("memory_note", None)
                 if generation := getattr(self.agent, "last_generation", None):
                     result["generation"] = copy.deepcopy(generation)
+                messages.append({"role": role, "task_chat_message": turn + ":assistant", **result})
+                save_json(path, messages)
+                if result.get("workflow_action"):
+                    self._workflow_action(state, result["workflow_action"])
+                    state.pop("_workflow_message", None)
+                    config = self._config(task_id)
+                    self.graph.update_state(config, state, as_node="finish")
+                    self.graph.invoke(state, config)
             except (Exception, KeyboardInterrupt) as error:
                 interrupted = isinstance(error, (AgentInterrupted, KeyboardInterrupt))
                 messages.append(
                     {
                         "role": role,
-                        "task_chat_message": turn + ":assistant",
+                        "task_chat_message": turn + ":error",
                         "answer": (
                             "This request was stopped."
                             if interrupted
                             else "This request failed: " + (str(error) or type(error).__name__)
                         )
-                        + "\n\nYour workflow step is unchanged. "
-                        "You can retry or give new instructions.",
+                        + "\n\nCheck the task status, then retry or give new instructions.",
                         "references": [],
                     }
                 )
                 save_json(path, messages)
                 raise
-            messages.append({"role": role, "task_chat_message": turn + ":assistant", **result})
-            save_json(path, messages)
-            if result.get("workflow_action"):
-                self._workflow_action(state, result["workflow_action"])
-                state.pop("_workflow_message", None)
-                config = self._config(task_id)
-                self.graph.update_state(config, state, as_node="finish")
-                self.graph.invoke(state, config)
             return self._view(self._state(task_id))
 
     def respond(self, task_id, action, **fields):
@@ -1566,11 +1565,10 @@ class Harness(WorkflowOverrides, CheckRunner):
         ):
             if self._clean_baseline(state):
                 actions.append("retarget_baseline")
-        if (
-            state.get("task_kind", "feature") == "feature"
-            and state["stage"] not in {"ready", "abandoning"}
-            and not state.get("checks_origin")
-        ):
+        if state.get("task_kind", "feature") == "feature" and state["stage"] not in {
+            "ready",
+            "abandoning",
+        }:
             actions.append("override_workflow")
         return actions
 

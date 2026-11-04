@@ -24,6 +24,18 @@ class WorkflowOverrides:
             raise ValueError("Worktree changed outside this task; inspect it before continuing")
         if state.get("agent_integrity_fingerprint"):
             self._check_agent_checkout(state, workspace, state["agent_integrity_fingerprint"])
+        if state.get("checks_origin"):
+            # A direct instruction can leave an auxiliary check session. Retain
+            # its evidence and the original task's test/permission boundaries.
+            check_context = {
+                key: copy.deepcopy(state[key])
+                for key in ("check_plan", "check_results")
+                if key in state
+            }
+            self._restore_after_checks(state, changed=False)
+            state.update(check_context)
+            for key in ("validated_fingerprint", "haskell_reviewer", "security_reviewer"):
+                state.pop(key, None)
         skips = sorted(set(state.get("workflow_skips", [])) | set(request["skip"]))
         if not state.get("specification"):
             if "requirements" not in skips or not request.get("specification"):
