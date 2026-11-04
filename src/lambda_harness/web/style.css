@@ -1803,56 +1803,100 @@ main {
   height: 44px;
 }
 .lambda-core {
+  position: relative;
   font-family: var(--font-mono);
-  font-size: 26px;
+  font-size: 24px;
   font-weight: 600;
   line-height: 1;
 }
-.lambda-spark {
+.lambda-network {
   position: absolute;
-  left: 19px;
-  top: 19px;
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: currentColor;
+  inset: -2px;
+  width: 48px;
+  height: 48px;
   color: var(--accent);
-  transform: rotate(0deg) translateX(20px);
 }
-.lambda-spark:nth-child(3) {
+.lambda-cluster {
+  transform-origin: center;
+}
+.lambda-link {
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1;
+  opacity: 0.3;
+}
+.lambda-link:nth-child(2) {
+  animation-delay: -0.6s;
+}
+.lambda-link:nth-child(3) {
+  animation-delay: -1.2s;
+}
+.lambda-link:nth-child(4) {
+  animation-delay: -1.8s;
+}
+.lambda-link:nth-child(5) {
+  animation-delay: -2.4s;
+}
+.lambda-spark {
+  fill: currentColor;
+}
+.lambda-spark:nth-of-type(2),
+.lambda-spark:nth-of-type(5) {
   color: var(--success);
-  transform: rotate(120deg) translateX(20px);
-  animation-delay: -1.6s;
 }
-.lambda-spark:nth-child(4) {
+.lambda-spark:nth-of-type(3) {
   color: var(--warm);
-  transform: rotate(240deg) translateX(20px);
-  animation-delay: -0.8s;
 }
-.response-progress[data-active="true"] .lambda-spark {
-  animation-name: lambda-orbit;
-  animation-duration: 2.4s;
-  animation-timing-function: linear;
+/* Animate only transforms and opacity on this small, fixed-size graphic.
+   Shared transforms keep every line attached to its dots without JS updates. */
+.response-progress[data-active="true"] .lambda-network {
+  animation: lambda-orbit 15s linear infinite;
+}
+.response-progress[data-active="true"] .lambda-cluster {
+  animation: lambda-gather 3s ease-in-out infinite;
+}
+.response-progress[data-active="true"] .lambda-link {
+  animation-name: lambda-signal;
+  animation-duration: 3s;
+  animation-timing-function: ease-in-out;
   animation-iteration-count: infinite;
 }
 .response-progress[data-active="true"] .lambda-core {
-  animation: lambda-breathe 2.4s ease-in-out infinite;
+  animation: lambda-breathe 3s ease-in-out infinite;
 }
 .response-progress[data-active="false"] {
   color: var(--muted);
 }
 @keyframes lambda-orbit {
-  from {
-    transform: rotate(0deg) translateX(20px);
-  }
   to {
-    transform: rotate(360deg) translateX(20px);
+    transform: rotate(360deg);
+  }
+}
+@keyframes lambda-gather {
+  0%,
+  100% {
+    transform: scale(1);
+  }
+  50% {
+    transform: scale(0.76);
+  }
+}
+@keyframes lambda-signal {
+  0%,
+  100% {
+    opacity: 0.22;
+  }
+  40% {
+    opacity: 0.8;
+  }
+  65% {
+    opacity: 0.35;
   }
 }
 @keyframes lambda-breathe {
   0%,
   100% {
-    opacity: 0.65;
+    opacity: 0.7;
     transform: scale(0.94);
   }
   50% {
@@ -1861,7 +1905,9 @@ main {
   }
 }
 @media (prefers-reduced-motion: reduce) {
-  .response-progress[data-active="true"] .lambda-spark,
+  .response-progress[data-active="true"] .lambda-network,
+  .response-progress[data-active="true"] .lambda-cluster,
+  .response-progress[data-active="true"] .lambda-link,
   .response-progress[data-active="true"] .lambda-core {
     animation: none;
   }
