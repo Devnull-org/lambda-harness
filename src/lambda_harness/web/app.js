@@ -932,6 +932,18 @@ function renderModelPicker() {
   if (!state) return;
   const conversation = selected && state.task?.task_id === selected;
   const creating = !selected;
+  const permissionMode = state.task?.permission_mode || "ask";
+  $("task-permissions").hidden =
+    !conversation || !state.task?.orchestrator_enabled || page !== "workspace";
+  $("task-permission-mode").value = permissionMode;
+  $("task-permission-mode").disabled =
+    permissionSaving ||
+    !!connectionError ||
+    (permissionMode === "full" && !!currentJob()?.running);
+  $("task-permission-help").textContent =
+    permissionMode === "full"
+      ? "Full filesystem, command and network access without prompts. Applies only to this task and its workers. Stop the model before reducing access."
+      : "Ask before additional access. Allow everything covers this task and its workers; full access starts with their next turn and releases pending permission requests immediately.";
   $("new-model-picker").hidden = !creating || page !== "workspace";
   $("reply-model-picker").hidden = !conversation || page !== "workspace";
   if (
@@ -1447,6 +1459,23 @@ function renderCheckResults(parent, result) {
   }
 }
 const pendingPermissionDecisions = new Set();
+let permissionSaving = false;
+async function saveTaskPermissions(mode, pending = null) {
+  if (permissionSaving || !selected) return;
+  const taskId = selected;
+  permissionSaving = true;
+  renderModelPicker();
+  try {
+    await api("/api/task-permissions", { task_id: taskId, mode, ...pending });
+    await refresh();
+  } finally {
+    permissionSaving = false;
+    renderModelPicker();
+  }
+}
+$("task-permission-mode").onchange = () =>
+  guard(() => saveTaskPermissions($("task-permission-mode").value));
+
 function runtimePermissionCard(task) {
   const job = currentJob(),
     request = job?.permission;
@@ -1515,6 +1544,30 @@ function runtimePermissionCard(task) {
       stopPending() ||
       !!state.stopping;
     controls.append(control);
+  }
+  if (task.orchestrator_enabled) {
+    const allowAll = button(
+      "Allow everything for this task",
+      () => {
+        if (selected !== task.task_id) return;
+        return saveTaskPermissions("full", {
+          job_id: job.id,
+          request_id: request.id,
+        });
+      },
+      "quiet",
+    );
+    allowAll.disabled =
+      permissionSaving ||
+      !!connectionError ||
+      stopPending() ||
+      !!state.stopping;
+    controls.append(allowAll);
+    entry.append(
+      prose(
+        "Allow everything also permits future filesystem, command and network access for this task and its workers without prompts.",
+      ),
+    );
   }
   entry.append(controls);
   return entry;

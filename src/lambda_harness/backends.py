@@ -150,6 +150,7 @@ class CommandAgent:
         activity=None,
         cancellation=None,
         approval=None,
+        permission_mode="ask",
     ):
         self.backend = backend
         self.name = name
@@ -162,6 +163,9 @@ class CommandAgent:
         self.progress = progress
         self.activity = activity
         self.approval = approval
+        if permission_mode not in {"ask", "full"}:
+            raise ValueError("Invalid task permission mode")
+        self.permission_mode = permission_mode
         self.cancellation = cancellation
         Backend.positive_timeout(self.timeout)
 
@@ -206,8 +210,21 @@ class CommandAgent:
 
     def _request_once(self, role, context, cwd, prompt, schema, cancel):
         writable = role in {"coding_worker", "check_worker"}
+        full_access = (
+            self.permission_mode == "full"
+            and role
+            in {"orchestrator", "coding_worker", "check_worker", "research_worker", "review_worker"}
+            and not context.get("backend_check")
+        )
+        sandbox = (
+            "danger-full-access" if full_access else "workspace-write" if writable else "read-only"
+        )
         self.last_commands = []
-        if writable and self.name != "codex" and self.backend.models_format != "codex":
+        if (
+            (writable or full_access)
+            and self.name != "codex"
+            and self.backend.models_format != "codex"
+        ):
             raise ValueError(
                 "Direct coding workers currently need the Codex backend. "
                 "Select Codex for this task."
@@ -220,8 +237,10 @@ class CommandAgent:
             "{effort_config}": "model_reasoning_effort=" + json.dumps(self.effort),
         }
         arguments = list(self.backend.command)
-        if writable and "--sandbox" in arguments:
-            arguments[arguments.index("--sandbox") + 1] = "workspace-write"
+        if (writable or full_access) and "--sandbox" in arguments:
+            arguments[arguments.index("--sandbox") + 1] = sandbox
+        if full_access and "--ask-for-approval" in arguments:
+            arguments[arguments.index("--ask-for-approval") + 1] = "never"
         if self.model is not None and not (self.approval and self.backend.approval_command):
             if self.backend.model_args:
                 arguments += self.backend.model_args
@@ -296,7 +315,8 @@ class CommandAgent:
                         cancel=cancel,
                         approve=self.approval,
                         progress=self.progress,
-                        sandbox="workspace-write" if writable else "read-only",
+                        sandbox=sandbox,
+                        approval_policy="never" if full_access else "on-request",
                         record_command=self.last_commands.append,
                     )
                     code, stderr = 0, ""

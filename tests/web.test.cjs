@@ -4858,3 +4858,77 @@ test("orchestrator answers stay visible while worker command evidence is collaps
   assert.ok(!evidence.open);
   assert.match(evidence.textContent, /Exit: 0/);
 });
+
+test("task permission chooser saves an explicit grant and stays isolated when switching tasks", async () => {
+  let current = snapshot();
+  current.task.orchestrator_enabled = true;
+  current.task.permission_mode = "ask";
+  const posts = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (url === "/api/task-permissions") {
+        const body = JSON.parse(options.body);
+        posts.push(body);
+        current.task.permission_mode = body.mode;
+        return response({ mode: body.mode });
+      }
+      return response(current);
+    },
+  });
+  assert.equal(ui.elements.get("task-permissions").hidden, false);
+  assert.equal(ui.elements.get("task-permission-mode").value, "ask");
+  assert.equal(posts.length, 0);
+  ui.elements.get("task-permission-mode").value = "full";
+  await ui.elements.get("task-permission-mode").onchange();
+  assert.deepEqual(posts, [{ task_id: "example", mode: "full" }]);
+  assert.equal(ui.elements.get("task-permission-mode").value, "full");
+  current.job = { id: "job", task_id: "example", running: true, log: [] };
+  await ui.run("refresh()");
+  assert.equal(ui.elements.get("task-permission-mode").disabled, true);
+  current = snapshot(task("other"));
+  current.task.orchestrator_enabled = true;
+  current.task.permission_mode = "ask";
+  ui.run('selectTask("other")');
+  await ui.run("refresh()");
+  assert.equal(ui.elements.get("task-permission-mode").value, "ask");
+  assert.equal(posts.length, 1);
+});
+
+test("pending approval offers allow everything scoped to that exact task request", async () => {
+  const current = snapshot();
+  current.task.orchestrator_enabled = true;
+  current.job = {
+    id: "job",
+    task_id: "example",
+    running: true,
+    log: [],
+    permission: {
+      id: "request",
+      method: "item/commandExecution/requestApproval",
+      details: { command: "nix build" },
+    },
+  };
+  const posts = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (options?.body) posts.push([url, JSON.parse(options.body)]);
+      return response(current);
+    },
+  });
+  const control = runtimeControls(ui).find(
+    (n) => n.textContent === "Allow everything for this task",
+  );
+  assert.ok(control);
+  await control.onclick();
+  assert.deepEqual(posts, [
+    [
+      "/api/task-permissions",
+      {
+        task_id: "example",
+        mode: "full",
+        job_id: "job",
+        request_id: "request",
+      },
+    ],
+  ]);
+});

@@ -32,6 +32,12 @@ input. It does not create commits or publish changes unless you ask.
 Direct editing currently requires the **Codex backend**. The selected model and
 reasoning effort apply to the orchestrator and its workers. Native requests for
 additional permissions appear in the conversation with Approve and Deny buttons.
+Use **Agent permissions for this task → Allow everything** to grant filesystem,
+command and network access without further prompts to the orchestrator and its
+workers. The choice is saved for that task only. Permission cards offer the same
+option to release a pending request. Stop the model before switching back to
+**Ask for additional permission**.
+
 **Stop model** preserves completed edits and the conversation; send revised
 instructions to continue from there.
 

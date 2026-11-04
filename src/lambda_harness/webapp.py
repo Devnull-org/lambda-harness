@@ -234,11 +234,69 @@ class LocalApp:
                 return False
             return self.cancellations[task_id].stop()
 
+    def task_permissions(self, task_id):
+        with ProjectSettings(state_directory(self.args.repo, self.args.state_dir)) as preferences:
+            return preferences.task_permissions(task_id)
+
+    def set_task_permissions(self, body):
+        task_id, mode = body.get("task_id"), body.get("mode")
+        validate_task_name(task_id)
+        if not isinstance(mode, str) or mode not in {"ask", "full"}:
+            raise ValueError("Choose Ask for permission or Allow everything")
+        harness = self.harness()
+        try:
+            if not harness._state(task_id).get("orchestrated") and not harness._view(
+                harness._state(task_id), inspect_worktree=False
+            ).get("orchestrator_enabled"):
+                raise ValueError("Task permissions are available for orchestrator tasks")
+        finally:
+            harness.close()
+        with self.lock:
+            job = self.jobs.get(task_id) or {}
+            if body.get("request_id") and (
+                not job.get("running")
+                or job.get("id") != body.get("job_id")
+                or (job.get("permission") or {}).get("id") != body["request_id"]
+            ):
+                raise ValueError("This permission request is no longer pending; refresh the task")
+            if body.get("request_id"):
+                waiter = self.permission_waiters.get(body["request_id"])
+                cancellation = self.cancellations.get(task_id)
+                if (
+                    not waiter
+                    or waiter["event"].is_set()
+                    or (
+                        cancellation
+                        and cancellation.active is not None
+                        and cancellation.active.is_set()
+                    )
+                ):
+                    raise ValueError("This permission request has already been resolved or stopped")
+            if mode == "ask" and job.get("running") and self.task_permissions(task_id) == "full":
+                raise ValueError("Stop the model before reducing this task's permissions")
+            if self.shutdown.is_set():
+                raise ValueError("This project was closed; reopen it first")
+            with ProjectSettings(
+                state_directory(self.args.repo, self.args.state_dir)
+            ) as preferences:
+                preferences.save_task_permissions(task_id, mode)
+            if mode == "full" and (pending := job.get("permission")):
+                if (waiter := self.permission_waiters.get(pending["id"])) and not waiter[
+                    "event"
+                ].is_set():
+                    waiter["decision"] = "approve"
+                    waiter["event"].set()
+        return {"mode": mode}
+
     def request_permission(self, job, request, cancel):
         request_id = secrets.token_hex(16)
         event = threading.Event()
         permission = {"id": request_id, **copy.deepcopy(request)}
         with self.lock:
+            if self.shutdown.is_set() or (cancel is not None and cancel.is_set()):
+                return False
+            if self.task_permissions(job["task_id"]) == "full":
+                return True
             job["permission"] = permission
             self.permission_waiters[request_id] = {"event": event, "decision": None}
         self.progress("Waiting for your permission in this task's conversation", job)
@@ -372,6 +430,7 @@ class LocalApp:
                 task["can_use_context"] = harness.can_use_context(task_id)
                 with ProjectSettings(harness.state_dir) as preferences:
                     task["model_selection"] = preferences.task_model(task_id)
+                    task["permission_mode"] = preferences.task_permissions(task_id)
         finally:
             harness.close()
         active = cancellation.active if cancellation else None
@@ -546,6 +605,7 @@ class LocalApp:
                 progress=progress,
                 cancellation=cancellation,
                 approval=lambda request, cancel: self.request_permission(job, request, cancel),
+                permission_mode=lambda: self.task_permissions(command["task_id"]),
             )
             action, task_id = command["command"], command["task_id"]
             if self.shutdown.is_set():
@@ -1018,6 +1078,8 @@ def create_server(app, port=8765, *, phone=None):
                 self.send(200, app.select_agent_repository(body))
             elif self.path == "/api/agents/assign":
                 self.send(200, app.assign_agent(body))
+            elif self.path == "/api/task-permissions":
+                self.send(200, app.set_task_permissions(body))
             elif self.path == "/api/approval":
                 self.send(200, app.decide_permission(body))
             elif self.path == "/api/stop":

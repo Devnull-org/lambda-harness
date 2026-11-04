@@ -19,7 +19,15 @@ appropriate checks. Formatting edits stay in the task's worktree.
 
 Direct editing currently uses **Codex**. Your selected model and effort are passed
 to every delegated worker. Additional runtime permission requests still need an
-explicit decision in the conversation. Denying one lets the worker find an allowed
+explicit decision in the conversation by default. **Agent permissions for this task**
+lets you choose **Allow everything**, giving the orchestrator and workers full
+filesystem, command and network access without further prompts. This preference
+survives restarts and applies only to that task. The same button on a pending
+permission request approves it and covers future requests. Full access starts with
+the next agent turn; pending requests are released immediately. Stop the model
+before reducing permissions back to **Ask for additional permission**.
+
+Denying one request lets the worker find an allowed
 approach or report the blocker. No commits or publishing happen unless requested.
 Use **Stop model** to interrupt work, then send revised instructions; completed
 edits are preserved. Expand a worker entry to inspect its command results.

@@ -68,6 +68,7 @@ class RoutedAgent:
         activity=None,
         cancellation=None,
         approval=None,
+        permission_mode="ask",
     ):
         if backend not in {None, "auto"} and backend not in settings.backends:
             raise ValueError(f"Unknown backend {backend!r}; choose a profile in Project settings")
@@ -79,6 +80,7 @@ class RoutedAgent:
         self.progress = progress
         self.activity = activity
         self.approval = approval
+        self.permission_mode = permission_mode
         self.cancellation = cancellation
         self.last_generation = None
 
@@ -105,6 +107,9 @@ class RoutedAgent:
             activity=self.activity,
             cancellation=self.cancellation,
             approval=self.approval,
+            permission_mode=self.permission_mode()
+            if callable(self.permission_mode)
+            else self.permission_mode,
         )
 
     def __call__(self, role, context, cwd):

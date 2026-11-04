@@ -373,3 +373,40 @@ def test_native_writer_uses_write_sandbox_and_explicit_file_approval(tmp_path, a
     assert commands == [
         {"command": "just check", "exit_code": 1, "output_tail": "one check failed"}
     ]
+
+
+@pytest.mark.parametrize(
+    "method",
+    [
+        "item/commandExecution/requestApproval",
+        "item/fileChange/requestApproval",
+        "item/permissions/requestApproval",
+    ],
+)
+def test_full_access_uses_user_granted_policy_without_another_prompt(tmp_path, method):
+    script = session_script(tmp_path, method)
+    source = (
+        Path(script)
+        .read_text()
+        .replace("p['sandbox']=='read-only'", "p['sandbox']=='danger-full-access'")
+        .replace("p['approvalPolicy']=='on-request'", "p['approvalPolicy']=='never'")
+    )
+    Path(script).write_text(source)
+
+    def unexpected(*args):
+        pytest.fail("Explicit full access must not open another approval prompt")
+
+    reply, _ = run_session(
+        [script],
+        tmp_path,
+        prompt="Implement",
+        schema={"type": "object"},
+        model="chosen-model",
+        env=os.environ.copy(),
+        timeout=5,
+        cancel=threading.Event(),
+        approve=unexpected,
+        sandbox="danger-full-access",
+        approval_policy="never",
+    )
+    assert json.loads(reply)["answer"] == "approved"

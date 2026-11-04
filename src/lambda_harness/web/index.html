@@ -691,6 +691,19 @@
             to this task's next response or phase.</small
           >
         </div>
+        <div id="task-permissions" class="model-picker" hidden>
+          <label for="task-permission-mode"
+            >Agent permissions for this task</label
+          >
+          <select
+            id="task-permission-mode"
+            aria-describedby="task-permission-help"
+          >
+            <option value="ask">Ask for additional permission</option>
+            <option value="full">Allow everything</option>
+          </select>
+          <small id="task-permission-help" class="muted" role="status"></small>
+        </div>
         <section id="composer" hidden>
           <div class="compose-top">
             <label id="composer-label" for="message">Your instructions</label

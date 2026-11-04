@@ -55,9 +55,10 @@ def run_session(
     progress=None,
     effort=None,
     sandbox="read-only",
+    approval_policy="on-request",
     record_command=None,
 ):
-    """Return the final structured reply and provider model; never auto-grant permissions."""
+    """Return the structured reply, applying the user-selected task permission policy."""
     if cancel is not None and cancel.is_set():
         raise ProcessError("Model request stopped", kind="cancelled")
     schema = strict_schema(schema)
@@ -151,10 +152,12 @@ def run_session(
                             continue
                         if method in APPROVALS or (
                             method == "item/fileChange/requestApproval"
-                            and sandbox == "workspace-write"
+                            and sandbox in {"workspace-write", "danger-full-access"}
                         ):
                             started = time.monotonic()
-                            allowed = approve({"method": method, "details": params}, cancel)
+                            allowed = (
+                                approval_policy == "never" and sandbox == "danger-full-access"
+                            ) or approve({"method": method, "details": params}, cancel)
                             deadline += time.monotonic() - started
                             next_progress = time.monotonic() + 15
                             if cancel is not None and cancel.is_set():
@@ -194,7 +197,7 @@ def run_session(
                             settings = {
                                 "cwd": str(cwd),
                                 "sandbox": sandbox,
-                                "approvalPolicy": "on-request",
+                                "approvalPolicy": approval_policy,
                                 "approvalsReviewer": "user",
                                 "ephemeral": True,
                                 "allowProviderModelFallback": False,

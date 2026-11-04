@@ -33,6 +33,25 @@ class ProjectSettings:
             "CREATE TABLE IF NOT EXISTS task_efforts (task_id TEXT PRIMARY KEY, effort TEXT)"
         )
 
+        self.connection.execute(
+            "CREATE TABLE IF NOT EXISTS task_permissions "
+            "(task_id TEXT PRIMARY KEY, mode TEXT NOT NULL)"
+        )
+
+    def task_permissions(self, task_id):
+        row = self.connection.execute(
+            "SELECT mode FROM task_permissions WHERE task_id = ?", (task_id,)
+        ).fetchone()
+        return row[0] if row else "ask"
+
+    def save_task_permissions(self, task_id, mode):
+        if mode not in {"ask", "full"}:
+            raise ValueError("Choose Ask for permission or Allow everything")
+        with self.connection:
+            self.connection.execute(
+                "INSERT OR REPLACE INTO task_permissions VALUES (?, ?)", (task_id, mode)
+            )
+
     def __enter__(self):
         return self
 
