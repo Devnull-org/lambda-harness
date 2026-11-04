@@ -23,6 +23,54 @@ def override(text, *, target="implement", skip=None, automatic=None, specificati
     }
 
 
+@pytest.mark.parametrize("boundary", ["specification_review", "tests_requested", "ready"])
+def test_plain_implementation_request_bypasses_process_without_magic_words(rig, boundary):
+    h, agent, execute = rig
+    original = h.start("task", "Fix addOne")
+    if boundary != "specification_review":
+        state = h._state("task")
+        h._phase_complete(state, boundary, "Waiting")
+        h.graph.update_state(h._config("task"), state, as_node="finish")
+    agent.responses["interviewer"].append(
+        {
+            "answer": "Starting coding.",
+            "workflow_action": {"action": "implement", "reason": "Implement addOne"},
+        }
+    )
+    view = h.task_chat("task", "Can you implement it now?")
+    state = h._state("task")
+    assert view["stage"] == "implementation_ready", view["prompt"]
+    assert view["worktree"] == original["worktree"]
+    assert (Path(view["worktree"]) / SOURCE).read_text() == IMPLEMENTED
+    assert (Path(view["worktree"]) / TEST).read_text() == "-- Existing tests\n"
+    assert "test_author" not in [role for role, _, _ in agent.calls]
+    assert state["validation"]["status"] == "green" and execute.calls
+    assert not {"validation", "patch_approval"} & set(state["workflow_skips"])
+    assert state["workflow_overrides"][-1]["user_instruction"] == "Can you implement it now?"
+
+
+def test_plain_coding_request_from_research_uses_working_scope_without_approval(rig):
+    from .test_exploration import ANALYSIS, research
+
+    h, agent, execute = rig
+    original = research(h, agent)
+    agent.responses["explorer"].append(
+        {
+            **ANALYSIS,
+            "workflow_action": {
+                "action": "implement",
+                "reason": "Implement the discussed change",
+                "specification": SPECIFICATION,
+            },
+        }
+    )
+    view = h.respond("research", "question", text="Implement what we discussed")
+    assert view["stage"] == "implementation_ready", view["prompt"]
+    assert view["worktree"] == original["worktree"]
+    assert "interviewer" not in [role for role, _, _ in agent.calls]
+    assert execute.calls
+
+
 def test_skip_test_writing_from_requested_phase_runs_implementation_and_checks(rig):
     h, agent, execute = rig
     approved(h)

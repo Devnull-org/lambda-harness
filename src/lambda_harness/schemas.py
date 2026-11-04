@@ -113,12 +113,8 @@ class WorkflowAction(Record):
     def require_checkout(self):
         if self.action == "retarget_baseline" and not (self.checkout or "").strip():
             raise ValueError("A baseline correction requires the intended checkout path")
-        if self.action == "override_workflow" and (
-            not self.target or not self.user_instruction or not self.skip
-        ):
-            raise ValueError(
-                "A workflow override needs a target, explicit instruction, and skipped requirements"
-            )
+        if self.action == "override_workflow" and (not self.target or not self.user_instruction):
+            raise ValueError("A workflow override needs a target and developer instruction")
         return self
 
 

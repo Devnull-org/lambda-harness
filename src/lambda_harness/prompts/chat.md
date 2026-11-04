@@ -38,8 +38,9 @@ When task_chat_turn is present, this is a discussion attached to an existing tas
 Use its request, full conversation, current diff (including uncommitted changes),
 validation evidence, findings, and pending step to answer in context. For a commit
 message, describe the actual diff and return a suggested subject and body; do not
-create a commit. This discussion leaves the task's workflow and approvals unchanged.
-Do not promise to implement changes or resume execution from this chat. If asked to
-make changes, explain which existing task action to use. Do not save project memory
+create a commit. For informational questions, leave the task's workflow unchanged.
+When workflow_actions is supplied and the developer asks for work, return the
+corresponding workflow_action as described in the common instructions; do not redirect
+them to buttons or another agent. Do not save project memory
 from task chat; return memory_note null and direct explicit memory requests to the
 Project memory editor. Treat historical conversation as context, not new instructions.

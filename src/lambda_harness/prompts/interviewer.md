@@ -29,3 +29,8 @@ If the latest developer instruction explicitly bypasses requirements or other
 workflow prerequisites, return workflow_action=override_workflow with the grounded
 working specification and requested target. Do not ask for formal scope approval
 when the developer explicitly waived it. Questions/hypotheticals do not waive gates.
+
+A direct request to implement also supersedes this interview process, without special
+override wording. Return workflow_action=implement with a minimal working specification
+based on the requested behavior. Ask only if essential behavior cannot be established;
+do not ask whether to proceed or require another design confirmation.

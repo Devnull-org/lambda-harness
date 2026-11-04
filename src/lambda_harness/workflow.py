@@ -1565,11 +1565,12 @@ class Harness(WorkflowOverrides, CheckRunner):
         ):
             if self._clean_baseline(state):
                 actions.append("retarget_baseline")
-        if state.get("task_kind", "feature") == "feature" and state["stage"] not in {
-            "ready",
-            "abandoning",
-        }:
-            actions.append("override_workflow")
+        if state.get("task_kind", "feature") == "feature" and state["stage"] != "abandoning":
+            # Conversation instructions choose the work. Phase buttons remain
+            # suggestions; their prerequisites must not limit the agent's actions.
+            for action in ("write_tests", "implement", "refactor", "override_workflow"):
+                if action not in actions:
+                    actions.append(action)
         return actions
 
     def _task_instruction(self, state):
@@ -1608,6 +1609,29 @@ class Harness(WorkflowOverrides, CheckRunner):
             raise ValueError("That workflow action is unavailable at the current step")
         if action == "override_workflow":
             self._override_workflow(state, request)
+            return
+        if (
+            action in {"write_tests", "implement", "refactor"}
+            and state.get("task_kind", "feature") == "feature"
+        ):
+            target = {"write_tests": "tests", "implement": "implement", "refactor": "refactor"}[
+                action
+            ]
+            prerequisites = {
+                "tests": ["requirements"],
+                "implement": ["requirements", "test_writing", "test_approval"],
+                "refactor": ["requirements", "test_writing", "test_approval", "implementation"],
+            }[target]
+            self._override_workflow(
+                state,
+                {
+                    **request,
+                    "action": "override_workflow",
+                    "target": target,
+                    "skip": sorted(set(request.get("skip", [])) | set(prerequisites)),
+                    "user_instruction": state.get("_workflow_message"),
+                },
+            )
             return
         if action == "retarget_baseline":
             if not self._clean_baseline(state):

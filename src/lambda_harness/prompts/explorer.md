@@ -35,3 +35,8 @@ For questions, comparisons, hypothetical or quoted implementation requests, and
 research-only instructions, return next_action=null and complete the analysis.
 Always return null when can_start_implementation=false. Continue read-only inspection;
 the coding workflow applies patches and runs validation after this handoff.
+
+When workflow_actions includes implement, prefer workflow_action=implement for a
+direct coding request. Include a minimal working specification if one is missing.
+This takes precedence over the older next_action preparation flow above: the user's
+instruction starts coding directly without another scope-approval or test-writing gate.
