@@ -778,18 +778,18 @@ class Harness(Orchestrator, WorkflowOverrides, CheckRunner):
         ):
             # Older checkpoints retain this obsolete instruction.
             view["prompt"] = {**view["prompt"], "summary": ""}
+        commits = state.get("commits", [])
+        view["revision"] = (
+            commits[-1]["revision"] if commits else state.get("starting_revision", state["base"])
+        )
         if state["stage"] == "abandoning":
             view["revision"] = state.get("cleanup_revision")
         elif inspect_worktree:
-            view["revision"] = self._workspace(state).revision
-        else:
-            # A browser poll reads checkpoints while another thread may remove a worktree.
-            commits = state.get("commits", [])
-            view["revision"] = (
-                commits[-1]["revision"]
-                if commits
-                else state.get("starting_revision", state["base"])
-            )
+            try:
+                view["revision"] = self._workspace(state).revision
+            except (ValueError, RuntimeError, OSError) as error:
+                # A missing or damaged checkout must not hide the saved conversation.
+                view["worktree_error"] = str(error)
         if state["stage"] in {"specification_ready", "exploration_ready"}:
             view["prompt"] = {**view["prompt"], "available_phases": self._available_phases(state)}
         if state["stage"] == "test_change_review":
@@ -870,12 +870,14 @@ class Harness(Orchestrator, WorkflowOverrides, CheckRunner):
                 "kind": {
                     "orchestrating": "running",
                     "orchestrator_ready": "success",
-                    "orchestrator_waiting": "waiting",
+                    "orchestrator_waiting": "error" if prompt.get("error") else "waiting",
                 }[stage],
                 "title": {
                     "orchestrating": "Orchestrator working",
                     "orchestrator_ready": "Request handled",
-                    "orchestrator_waiting": "Your input is needed",
+                    "orchestrator_waiting": "Task stopped"
+                    if prompt.get("error")
+                    else "Your input is needed",
                 }[stage],
                 "detail": prompt.get("summary", ""),
                 "guidance": "Continue the conversation with the orchestrator.",
@@ -1133,7 +1135,14 @@ class Harness(Orchestrator, WorkflowOverrides, CheckRunner):
                     and state.get("task_kind") != "checks"
                     else ["retry"]
                 )
-                if isinstance(error, AgentInterrupted):
+                if state.get("orchestrated") and (
+                    not isinstance(error, AgentInterrupted)
+                    or not Path(state.get("worktree", "")).is_dir()
+                ):
+                    self._orchestration_failure(
+                        state, "The task stopped: " + (str(error) or type(error).__name__)
+                    )
+                elif isinstance(error, AgentInterrupted):
                     self._gate(
                         state,
                         "agent_paused",

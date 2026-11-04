@@ -119,6 +119,25 @@ def test_existing_blocked_task_adopted_without_recreating_worktree_or_other_task
     assert "Unrelated task" not in json.dumps(h.agent.calls, default=str)
 
 
+def test_missing_worktree_reports_blocker_in_orchestrator_conversation(rig):
+    h, _, _ = rig
+    original = h.start("missing", "Implement the arithmetic change")
+    git(h.repository, "worktree", "remove", original["worktree"])
+    h.agent = NativeAgent([])
+
+    view = h.orchestrate("missing", "Continue implementation")
+
+    assert view["stage"] == "orchestrator_waiting"
+    assert "worktree is missing" in view["prompt"]["summary"]
+    assert view["revision"] == original["base"]
+    assert h.inspect("missing")["stage"] == "orchestrator_waiting"
+    assert not h.agent.calls
+    assert h._state("missing")["messages"][-2:] == [
+        {"role": "orchestrator", "text": "Continue implementation"},
+        {"role": "orchestrator", "answer": view["prompt"]["summary"]},
+    ]
+
+
 def test_stopped_worker_preserves_edits_and_next_message_gets_partial_result(rig):
     h, _, _ = rig
 
@@ -182,3 +201,49 @@ def test_controller_context_does_not_copy_old_source_patches_or_unbounded_logs(r
     ]
     assert len(json.dumps(controller_results(results))) < 40_000
     assert len(results[0]["commands"]) == 1000  # full receipt stays intact
+
+
+def test_worktree_disappearing_during_worker_persists_failure_instead_of_running(rig):
+    import shutil
+
+    h, _, _ = rig
+
+    def removed(agent, role, context, cwd):
+        shutil.rmtree(cwd)
+        raise RuntimeError("Worktree disappeared during execution")
+
+    h.agent = NativeAgent([delegate("coding_worker", "Implement")], removed)
+    view = h.start("vanished", "Implement", phase="orchestrator")
+    assert view["stage"] == "orchestrator_waiting"
+    assert view["outcome"]["kind"] == "error"
+    assert "The task stopped" in h._state("vanished")["messages"][-1]["answer"]
+    assert h._state("vanished")["orchestration"]["status"] == "waiting"
+    assert h.inspect("vanished")["outcome"]["kind"] == "error"
+
+
+def test_controller_backend_failure_survives_later_inspection_and_accepts_next_message(rig):
+    h, _, _ = rig
+    h.agent = NativeAgent([answer()])
+    h.start("failure", "Help", phase="orchestrator")
+
+    def failed(*args):
+        raise RuntimeError("Provider connection lost")
+
+    h.agent = failed
+    view = h.orchestrate("failure", "Implement")
+    assert view["outcome"]["kind"] == "error"
+    assert "Provider connection lost" in h._state("failure")["messages"][-1]["answer"]
+    h.agent = NativeAgent([answer("Continuing")])
+    assert h.orchestrate("failure", "Continue")["stage"] == "orchestrator_ready"
+
+
+def test_damaged_git_pointer_does_not_hide_error_or_conversation(rig):
+    h, _, _ = rig
+    original = h.start("damaged", "Implement")
+    (Path(original["worktree"]) / ".git").write_text("gitdir: /nonexistent/harness-test-gitdir\n")
+    h.agent = NativeAgent([])
+    view = h.orchestrate("damaged", "What happened?")
+    assert view["outcome"]["kind"] == "error"
+    assert view["worktree_error"]
+    assert h.inspect("damaged")["stage"] == "orchestrator_waiting"
+    assert h._state("damaged")["messages"][-2]["text"] == "What happened?"

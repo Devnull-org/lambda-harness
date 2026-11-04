@@ -59,6 +59,16 @@ class Orchestrator:
             return self.task_chat(task_id, text)
         with self._lock(task_id):
             state = copy.deepcopy(self._state(task_id))
+            if state.get("worktree") and not Path(state["worktree"]).is_dir():
+                answer = (
+                    "This task's worktree is missing, so I cannot inspect or continue its "
+                    "saved changes. Restore the worktree at its saved path, or start a new "
+                    "task from the repository. The previous conversation is still available."
+                )
+                state["messages"].append({"role": "orchestrator", "text": text})
+                self._orchestration_failure(state, answer)
+                self.graph.update_state(self._config(task_id), state, as_node="finish")
+                return self._view(state)
             self._start_orchestration_turn(state, text)
             config = self._config(task_id)
             # Adopt the current worktree, including a legacy pending phase. No
@@ -66,6 +76,15 @@ class Orchestrator:
             self.graph.update_state(config, state, as_node="finish")
             self.graph.invoke(state, config)
             return self._view(self._state(task_id))
+
+    @staticmethod
+    def _orchestration_failure(state, answer):
+        """Persist failures without requiring the broken checkout to be readable."""
+        state["orchestrated"] = True
+        state.setdefault("orchestration", {})["status"] = "waiting"
+        state["messages"].append({"role": "orchestrator", "answer": answer})
+        state["stage"], state["next"] = "orchestrator_waiting", "end"
+        state["prompt"] = {"summary": answer, "error": answer, "actions": ["question"]}
 
     def _start_orchestration_turn(self, state, text):
         if not state.get("worktree"):

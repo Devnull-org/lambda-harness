@@ -1831,3 +1831,32 @@ def test_browser_orchestrator_start_and_followup_use_saved_task_model(browser_ap
     assert final["task"]["messages"][-1]["answer"] == "Suggested commit message"
     assert selected == [("test", "chosen-model"), ("test", "chosen-model")]
     assert final["task"]["worktree"] == first["task"]["worktree"]
+
+
+def test_missing_worktree_gets_saved_reply_in_browser_instead_of_dead_job(browser_app, monkeypatch):
+    from .test_orchestrator import NativeAgent
+
+    app, call, _, _ = browser_app
+    h = app.harness(ScriptedAgent())
+    try:
+        original = h.start("missing", "Implement")
+        git(h.repository, "worktree", "remove", original["worktree"])
+    finally:
+        h.close()
+    agent = NativeAgent([])
+    monkeypatch.setattr("lambda_harness.webapp.RoutedAgent", lambda *a, **kw: agent)
+    monkeypatch.setattr("lambda_harness.webapp.select_backend", lambda *a: "test")
+    assert (
+        call(
+            "/api/command",
+            {"command": "orchestrate", "task_id": "missing", "text": "What happened?"},
+        )[0]
+        == 202
+    )
+    wait_for(lambda: not call("/api/state?task=missing")[1]["job"]["running"])
+    view = call("/api/state?task=missing")[1]
+    assert view["job"]["error"] is None
+    assert view["task"]["outcome"]["kind"] == "error"
+    assert view["task"]["stage"] == "orchestrator_waiting"
+    assert "worktree is missing" in view["task"]["messages"][-1]["answer"]
+    assert not agent.calls
