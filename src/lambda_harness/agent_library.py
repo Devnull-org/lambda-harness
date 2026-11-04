@@ -13,6 +13,11 @@ from .schemas import AgentDefinition
 from .workspace import digest, git
 
 ROLES = {
+    "orchestrator": "Task orchestrator",
+    "coding_worker": "Coding agent",
+    "check_worker": "Checks agent",
+    "research_worker": "Research agent",
+    "review_worker": "Review agent",
     "test_runner": "Test runner",
     "chat": "General chat",
     "explorer": "Explorer",

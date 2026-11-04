@@ -3,6 +3,7 @@
 import json
 import os
 import threading
+from pathlib import Path
 
 import pytest
 
@@ -323,3 +324,52 @@ def test_native_schema_error_is_readable_and_keeps_provider_reason(tmp_path):
             cancel=None,
             approve=lambda *_: False,
         )
+
+
+@pytest.mark.parametrize("allowed", [True, False])
+def test_native_writer_uses_write_sandbox_and_explicit_file_approval(tmp_path, allowed):
+    script = session_script(tmp_path, "item/fileChange/requestApproval")
+    source = (
+        Path(script)
+        .read_text()
+        .replace("p['sandbox']=='read-only'", "p['sandbox']=='workspace-write'")
+    )
+    source = source.replace(
+        "assert r['params']['outputSchema']['type']=='object'",
+        "assert r['params']['outputSchema']['type']=='object'\n"
+        "        assert r['params']['model']=='selected-model' "
+        "and r['params']['effort']=='high'",
+    )
+    source = source.replace(
+        "answer=json.dumps",
+        "send({'method':'item/completed','params':{'threadId':'thread','turnId':'turn',"
+        "'item':{'type':'commandExecution','command':'just check','exitCode':1,"
+        "'aggregatedOutput':'one check failed'}}})\n        answer=json.dumps",
+    )
+    Path(script).write_text(source)
+    requests, commands = [], []
+
+    def approve(request, cancel):
+        requests.append(request)
+        return allowed
+
+    answer, model = run_session(
+        [script],
+        tmp_path,
+        prompt="Implement",
+        schema={"type": "object"},
+        model="selected-model",
+        effort="high",
+        env=os.environ.copy(),
+        timeout=5,
+        cancel=threading.Event(),
+        approve=approve,
+        sandbox="workspace-write",
+        record_command=commands.append,
+    )
+    assert json.loads(answer)["answer"] == ("approved" if allowed else "denied")
+    assert model == "selected-model"
+    assert requests[0]["method"] == "item/fileChange/requestApproval"
+    assert commands == [
+        {"command": "just check", "exit_code": 1, "output_tail": "one check failed"}
+    ]

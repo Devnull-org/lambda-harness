@@ -1781,3 +1781,53 @@ def test_review_model_and_effort_reach_both_reviewers_and_survive_replies(browse
     assert "not supported" in app.job["error"]
     assert len(calls.read_text().splitlines()) == count
     assert call("/api/state?task=effort-review")[1]["task"]["model_selection"]["effort"] == "low"
+
+
+def test_browser_orchestrator_start_and_followup_use_saved_task_model(browser_app, monkeypatch):
+    from .test_orchestrator import NativeAgent, answer
+
+    app, call, _, _ = browser_app
+    agent = NativeAgent([answer("Ready"), answer("Suggested commit message")])
+    selected = []
+
+    def routed(*args, **kwargs):
+        selected.append((kwargs.get("backend"), kwargs.get("model")))
+        return agent
+
+    monkeypatch.setattr("lambda_harness.webapp.RoutedAgent", routed)
+    monkeypatch.setattr("lambda_harness.webapp.select_backend", lambda *a: "test")
+    code, _ = call(
+        "/api/command",
+        {
+            "command": "start",
+            "controller": "orchestrator",
+            "task_id": "coordinator",
+            "request": "Help with the task",
+            "base": "main",
+            "backend": "test",
+            "model": "chosen-model",
+        },
+    )
+    assert code == 202
+    wait_for(lambda: not call("/api/state?task=coordinator")[1]["job"]["running"])
+    first = call("/api/state?task=coordinator")[1]
+    assert first["job"]["error"] is None
+    assert first["task"]["stage"] == "orchestrator_ready"
+    assert first["task"]["orchestrator_enabled"]
+    assert (
+        call(
+            "/api/command",
+            {
+                "command": "orchestrate",
+                "task_id": "coordinator",
+                "text": "Give me a commit message",
+            },
+        )[0]
+        == 202
+    )
+    wait_for(lambda: not call("/api/state?task=coordinator")[1]["job"]["running"])
+    final = call("/api/state?task=coordinator")[1]
+    assert final["job"]["error"] is None
+    assert final["task"]["messages"][-1]["answer"] == "Suggested commit message"
+    assert selected == [("test", "chosen-model"), ("test", "chosen-model")]
+    assert final["task"]["worktree"] == first["task"]["worktree"]

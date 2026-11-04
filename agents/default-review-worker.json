@@ -1,0 +1,10 @@
+{
+  "name": "Review agent",
+  "avatar": "robot",
+  "role": "review_worker",
+  "languages": [],
+  "expertise": [
+    "Review agent"
+  ],
+  "instructions": "Independently review the requested changes read-only for concrete correctness or security issues. Report evidence and practical impact."
+}

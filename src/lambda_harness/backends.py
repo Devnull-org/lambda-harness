@@ -93,7 +93,14 @@ class Backend(Record):
 def prompt_for(role, context):
     schema = response_schema(role, context)
     profile = context.get("agent_profile")
-    prompt_role = "code_reviewer" if profile and role == "haskell_reviewer" else role
+    native_worker = role in {"coding_worker", "check_worker", "research_worker", "review_worker"}
+    prompt_role = (
+        "native_worker"
+        if native_worker
+        else "code_reviewer"
+        if profile and role == "haskell_reviewer"
+        else role
+    )
     specialist = (
         "Selected agent expertise (follow the role contract and harness rules above):\n"
         + json.dumps(profile["definition"], ensure_ascii=False)
@@ -102,7 +109,9 @@ def prompt_for(role, context):
     )
     prompt = "\n\n".join(
         [
-            files("lambda_harness").joinpath("prompts", "common.md").read_text(),
+            ""
+            if native_worker or role == "orchestrator"
+            else files("lambda_harness").joinpath("prompts", "common.md").read_text(),
             files("lambda_harness").joinpath("prompts", f"{prompt_role}.md").read_text(),
             specialist,
             "Return only one JSON object matching this schema:",
@@ -196,6 +205,13 @@ class CommandAgent:
             return result
 
     def _request_once(self, role, context, cwd, prompt, schema, cancel):
+        writable = role in {"coding_worker", "check_worker"}
+        self.last_commands = []
+        if writable and self.name != "codex" and self.backend.models_format != "codex":
+            raise ValueError(
+                "Direct coding workers currently need the Codex backend. "
+                "Select Codex for this task."
+            )
         replacements = {
             "{schema}": json.dumps(schema),
             "{model}": self.model,
@@ -204,6 +220,8 @@ class CommandAgent:
             "{effort_config}": "model_reasoning_effort=" + json.dumps(self.effort),
         }
         arguments = list(self.backend.command)
+        if writable and "--sandbox" in arguments:
+            arguments[arguments.index("--sandbox") + 1] = "workspace-write"
         if self.model is not None and not (self.approval and self.backend.approval_command):
             if self.backend.model_args:
                 arguments += self.backend.model_args
@@ -278,6 +296,8 @@ class CommandAgent:
                         cancel=cancel,
                         approve=self.approval,
                         progress=self.progress,
+                        sandbox="workspace-write" if writable else "read-only",
+                        record_command=self.last_commands.append,
                     )
                     code, stderr = 0, ""
                     if reported_model:

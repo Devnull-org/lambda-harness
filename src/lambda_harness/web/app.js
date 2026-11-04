@@ -1110,6 +1110,7 @@ async function command(body) {
       "checks",
       "task_checks",
       "task_chat",
+      "orchestrate",
       "respond",
       "run",
       "resume",
@@ -1348,6 +1349,28 @@ function responseProgress(taskId) {
     return "Waiting for your permission…";
   if (!working) return "Sending…";
   if (state.activity_kind === "validation") return "Running checks…";
+  if (state.task?.orchestrator_enabled) {
+    const prefix = taskId + ": ";
+    const activity = (currentJob().log || []).findLast(
+      (line) =>
+        line.startsWith(prefix) &&
+        /^(orchestrator$|coding worker|check worker|research worker|review worker)/.test(
+          line.slice(prefix.length),
+        ),
+    );
+    if (activity) {
+      const role = activity.slice(prefix.length).split(" · ")[0];
+      return (
+        {
+          orchestrator: "Orchestrator thinking…",
+          "coding worker": "Coding agent working…",
+          "check worker": "Check agent working…",
+          "research worker": "Research agent working…",
+          "review worker": "Review agent working…",
+        }[role] || "Working…"
+      );
+    }
+  }
   return currentJob().operation === "review_action" ? "Working…" : "Thinking…";
 }
 function patchReceipt(revision) {
@@ -1440,6 +1463,9 @@ function runtimePermissionCard(task) {
   if (network) section(entry, "Network destination", network);
   if (details.command) section(entry, "Command", details.command, "sh");
   if (details.cwd) section(entry, "Working directory", details.cwd);
+  if (details.grantRoot)
+    section(entry, "Requested directory", details.grantRoot);
+  if (details.changes) section(entry, "File changes", details.changes);
   if (details.permissions || details.additionalPermissions)
     section(
       entry,
@@ -1450,9 +1476,11 @@ function runtimePermissionCard(task) {
     prose(
       request.method === "item/permissions/requestApproval"
         ? "Approval grants the listed access for this model turn only."
-        : network
-          ? "Approval allows this pending network request; no permanent rule is saved."
-          : "Approval permits this command with the requested access, which may extend beyond the sandbox. No permanent rule is saved.",
+        : request.method === "item/fileChange/requestApproval"
+          ? "Approval permits this pending file change. No permanent rule is saved."
+          : network
+            ? "Approval allows this pending network request; no permanent rule is saved."
+            : "Approval permits this command with the requested access, which may extend beyond the sandbox. No permanent rule is saved.",
     ),
   );
   const controls = el("div", undefined, "button-row");
@@ -1672,7 +1700,9 @@ function renderHistory(task) {
       ? "Stopped · " + failureSummary(failure, 120)
       : task.outcome?.kind === "paused" || task.stage === "agent_paused"
         ? "Paused · waiting for instructions"
-        : task.stage === "ready" || task.stage.endsWith("_complete")
+        : task.stage === "ready" ||
+            task.stage === "orchestrator_ready" ||
+            task.stage.endsWith("_complete")
           ? "Complete"
           : "Ready · waiting for instructions";
   const label = `${task.task_id} · ${progress || idle}`;
@@ -1716,7 +1746,25 @@ function renderHistory(task) {
   history.replaceChildren(message("Initial request", task.request, true));
   for (const item of messages) {
     if (item.text) history.append(message("You", item.text, true));
-    else if (item.task_chat_message && item.answer)
+    else if (item.role === "orchestrator")
+      history.append(message("Orchestrator", item.answer));
+    else if (item.worker_result) {
+      const result = item.worker_result;
+      const detail = el("details", undefined, "message");
+      detail.append(
+        el(
+          "summary",
+          result.worker.replaceAll("_", " ") + " · " + result.status,
+        ),
+        prose(result.summary),
+      );
+      for (const receipt of result.commands || [])
+        detail.append(
+          codeBlock(receipt.command, "sh"),
+          prose("Exit: " + receipt.exit_code),
+        );
+      history.append(detail);
+    } else if (item.task_chat_message && item.answer)
       history.append(
         message(
           item.role === "chat" ? "Assistant" : item.role.replaceAll("_", " "),
@@ -1923,6 +1971,17 @@ function focusTaskInstructions(task) {
   $("message").scrollIntoView({ block: "center" });
 }
 function taskContinuation(task) {
+  if (task.orchestrator_enabled)
+    return task.stage === "orchestrator_ready"
+      ? null
+      : {
+          label: "Continue",
+          body: {
+            command: "orchestrate",
+            task_id: task.task_id,
+            text: "Continue the task from its current worktree and saved results. Carry out the work I requested.",
+          },
+        };
   const actions = task.prompt?.actions || [];
   if (actions.includes("retry_longer"))
     return {
@@ -2155,6 +2214,7 @@ function renderTask(task, running) {
   }
 
   $("execution-controls").hidden =
+    task.orchestrator_enabled ||
     (task.task_kind || "feature") !== "feature" ||
     task.stage === "ready" ||
     task.stage.startsWith("checks_");
@@ -2164,11 +2224,13 @@ function renderTask(task, running) {
   $("execution-mode").disabled = running;
   const prompt = task.prompt || {},
     actions = prompt.actions || [],
-    messageActions = actions.some((action) => textActions.includes(action))
-      ? actions.filter((action) => textActions.includes(action))
-      : task.can_task_chat
-        ? ["task_chat"]
-        : [],
+    messageActions = task.orchestrator_enabled
+      ? ["task_chat"]
+      : actions.some((action) => textActions.includes(action))
+        ? actions.filter((action) => textActions.includes(action))
+        : task.can_task_chat
+          ? ["task_chat"]
+          : [],
     key = JSON.stringify([
       messageActions,
       task.task_id,
@@ -2209,6 +2271,8 @@ function renderTask(task, running) {
       el("strong", stageLabel(task.stage)),
       button("← All agents", openAgents, "quiet"),
     );
+  } else if (task.orchestrator_enabled) {
+    $("task-meta").append(el("div", "One conversation · Task orchestrator"));
   } else if (Object.keys(task.agent_profiles || {}).length) {
     $("task-meta").append(
       el(
@@ -2442,8 +2506,12 @@ function renderTask(task, running) {
   }
   $("composer").hidden =
     !messageActions.length && !running && !responseProgress(task.task_id);
-  const chatting = task.stage === "chat";
-  $("composer-label").textContent = chatting ? "Message" : "Message the agent";
+  const chatting = task.stage === "chat" || task.orchestrator_enabled;
+  $("composer-label").textContent = task.orchestrator_enabled
+    ? "Message your orchestrator"
+    : chatting
+      ? "Message"
+      : "Message the agent";
   $("message").placeholder = chatting
     ? "Ask a question or continue the conversation."
     : "Ask a follow-up or describe what should change.";
@@ -2456,6 +2524,7 @@ function renderTask(task, running) {
   $("actions").replaceChildren();
   for (const action of actions.filter(
     (a) =>
+      !task.orchestrator_enabled &&
       !textActions.includes(a) &&
       !(
         task.stage === "test_change_review" &&
@@ -2485,7 +2554,8 @@ function renderTask(task, running) {
     control.disabled = running;
     $("actions").append(control);
   }
-  $("next-phases").hidden = !(prompt.available_phases || []).length;
+  $("next-phases").hidden =
+    task.orchestrator_enabled || !(prompt.available_phases || []).length;
   $("phases").replaceChildren();
   for (const phase of prompt.available_phases || []) {
     const label =
@@ -2547,16 +2617,19 @@ async function respond(action) {
   const pending = pendingMessage;
   try {
     await command(
-      action === "task_chat"
-        ? { command: "task_chat", task_id: selected, text }
-        : {
-            command: "respond",
-            task_id: selected,
-            action,
-            text,
-            token: state.task.prompt.approval_token,
-            finding_ids: ids,
-          },
+      state.task.orchestrator_enabled &&
+        [...textActions, "task_chat"].includes(action)
+        ? { command: "orchestrate", task_id: selected, text }
+        : action === "task_chat"
+          ? { command: "task_chat", task_id: selected, text }
+          : {
+              command: "respond",
+              task_id: selected,
+              action,
+              text,
+              token: state.task.prompt.approval_token,
+              finding_ids: ids,
+            },
     );
     if (pending) pending.status = "Sent · waiting for the agent";
     if (selected === respondingTask && $("message").value === text)
@@ -3056,7 +3129,7 @@ function updateNewTask() {
     tests = kind === "tests";
   $("review-options").hidden = !review;
   $("test-options").hidden = !tests;
-  $("walkthrough-option").hidden = kind !== "start";
+  $("walkthrough-option").hidden = true;
   $("review-head").required = review;
   $("test-packages").required = tests;
   $("test-criteria").required = tests;
@@ -3103,7 +3176,7 @@ function updateNewTask() {
   }
   $("start-task").textContent = {
     explore: "Start exploration →",
-    start: "Start interview →",
+    start: "Start task →",
     review: "Start review →",
     tests: "Write tests →",
     checks: "Discover checks and tests →",
@@ -3123,7 +3196,7 @@ $("new-form").onsubmit = (e) => {
     request: $("request").value,
     base: $("base").value,
   };
-  if (kind === "start") body.walkthrough = $("require-walkthrough").checked;
+  if (kind === "start") body.controller = "orchestrator";
   if (kind === "review")
     Object.assign(body, {
       head: $("review-head").value,
@@ -3165,7 +3238,17 @@ $("new-task").onclick = () =>
   });
 $("refresh").onclick = () => guard(refresh);
 $("task-checks").onclick = () =>
-  guard(() => command({ command: "task_checks", task_id: selected }));
+  guard(() =>
+    command(
+      state.task?.orchestrator_enabled
+        ? {
+            command: "orchestrate",
+            task_id: selected,
+            text: "Run all appropriate project checks and tests in this task worktree. Discover and execute the required commands, keep formatting changes here, and report the actual results.",
+          }
+        : { command: "task_checks", task_id: selected },
+    ),
+  );
 $("latest-message").onclick = scrollToLatestMessage;
 function updateBackToTop() {
   $("back-to-top").hidden = (globalThis.scrollY || 0) < 400;

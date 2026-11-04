@@ -12,80 +12,35 @@ A local workspace for functional programming teams, from conversation to reviewe
 
 ---
 
-Good software starts with a clear conversation. Lambda Harness helps you explore
-an idea, sharpen the requirements, and work through the change with specialist
-agents—all from a local website.
+Talk to one task orchestrator. It answers questions, delegates implementation,
+checks and investigation to workers, and uses their results to keep working.
+Your instructions determine the work; specification, test-writing and review
+phases are no longer prerequisites for the default conversation.
 
-**You approve the specification. You approve the tests. You choose what happens next.**
+Choose **New task → Work with an orchestrator**, select your repository, base,
+model and effort, and describe the result you want. On an existing feature task,
+send your next instruction in the same conversation to adopt its current worktree.
+No restart is necessary. **Continue** asks the orchestrator to carry on; **Run all
+checks and tests** asks it to discover and execute the relevant checks.
 
-## A workflow that respects your craft
+Workers edit directly in the selected task's isolated worktree. Failed checks
+return to the orchestrator for diagnosis, repair and rechecking. Worker summaries
+and actual command receipts appear in expandable conversation entries. The
+orchestrator reports completion or explains the concrete blocker requiring your
+input. It does not create commits or publish changes unless you ask.
 
-- **Think before coding.** Explore the repository and compare approaches, or let an
-  interviewer challenge your assumptions until the requirements are clear.
-- **Tests lead the way.** Review failing Cabal tests before implementation begins.
-  Strict builds, lint, and Nix checks accompany code changes.
-- **Build your team.** Browse agents with their own avatars, shape new specialists
-  through chat, and share their definitions in Git.
-- **Get a second opinion.** Review code, security, or documentation with dedicated
-  specialists. An optional walkthrough helps you retain context.
-- **Keep project knowledge close.** Save notes straight from chat, edit shared memory,
-  preview what agents receive, and revisit earlier versions.
-- **Own every patch.** Work stays in isolated local worktrees, with saved conversations
-  and small commits. Prepare a handoff when you're ready to publish.
-- **Pass the work on.** Export a handoff with the conversation, code, and project
-  memory. A teammate imports it and continues from the saved step.
-- **Pick up from your phone.** Connect privately through Tailscale to ask questions,
-  review results, and approve the next step. [Set up phone access](docs/GUIDE.md#work-from-your-phone).
+Direct editing currently requires the **Codex backend**. The selected model and
+reasoning effort apply to the orchestrator and its workers. Native requests for
+additional permissions appear in the conversation with Approve and Deny buttons.
+**Stop model** preserves completed edits and the conversation; send revised
+instructions to continue from there.
 
-Start where you need help: have a chat, explore an idea, write tests, review a PR,
-or take a feature through the full workflow. Every phase is a choice.
+Tasks keep separate conversations, worktrees, model choices, progress and stop
+controls. Different tasks can run simultaneously. Project memory remains shared.
+Existing standalone review, chat, agent-authoring and check tasks remain available;
+the older phase APIs remain compatible for explicit integrations.
 
-The task status reports whether a step completed, needs your input, or stopped with
-an error. In **How to continue**, choose **One step at a time** or **All remaining
-steps automatically**, then choose an action to start. Automatic mode still waits
-for approvals and stops at the first error. After a failed check, choose **Ask agent
-to fix the failure**, rerun checks, or send different instructions. Existing tasks
-can continue this way without restarting.
-
-Tasks can run at the same time in separate worktrees. Each task keeps its own model
-choice, conversation, draft, progress log, result, and stop control. Switching tasks
-does not move an active request, and a background task finishing does not switch your
-view. One operation runs per task; project-wide settings and handoff transfers wait
-until running tasks finish. Project memory remains shared intentionally.
-
-Errors support conversation too: use **Ask a question** to ask what failed, request
-commands you can run yourself, or describe an alternative. The agent can retry a
-supported operation with your instructions; suggested commands are displayed, not
-executed automatically. A failed commit also offers **Continue without commits**
-(or ask for that in chat). This keeps subsequent changes uncommitted for this task
-while validation and reviews continue. Existing commits and Git settings are preserved.
-Signing errors include a terminal unlock suggestion based on the
-[GnuPG guidance](https://www.gnupg.org/documentation/manuals/gnupg/Common-Problems.html).
-
-Use **Run all checks and tests** on a completed task step to invoke the **Test runner**
-agent in that task's worktree, including its uncommitted changes. It reads repository
-instructions, task recipes, CI, and test manifests, then presents an ordered command
-plan with suite coverage and omissions. Review the plan and choose **Run all checks
-and tests** to execute it. Formatters such as `nix fmt` and `just lint` run first and
-their changes stay in the worktree. The runner collects results for every planned
-command, even when an earlier check fails, and supports stopping and rerunning.
-It does not create commits. Use **Return to coding task** afterward; changed content
-requires accepting the diff and revalidating before coding or review continues.
-
-For a separate check task, choose **Run checks and tests** under New task and select
-a base revision. Customize the **Test runner** definition and assignment on Agents.
-
-```mermaid
-flowchart LR
-  Explore --> Interview
-  Interview --> Spec[Approve specification]
-  Spec --> Tests[Failing tests]
-  Tests --> Approval[Approve tests]
-  Approval --> Implement
-  Implement --> Refactor
-  Refactor --> Review
-  Review --> Handoff[Local handoff]
-```
+[User guide](docs/GUIDE.md) · [Phone access](docs/GUIDE.md#work-from-your-phone)
 
 ## Open your workspace
 

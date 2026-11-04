@@ -249,6 +249,35 @@ class WorkflowReply(Explanation):
     workflow_action: WorkflowAction | None = None
 
 
+class OrchestratorDecision(Record):
+    answer: str = Field(min_length=1)
+    action: Literal["respond", "delegate"]
+    status: Literal["working", "complete", "waiting"]
+    worker: Literal["coding_worker", "check_worker", "research_worker", "review_worker"] | None = (
+        None
+    )
+    instruction: str | None = None
+
+    @model_validator(mode="after")
+    def executable_decision(self):
+        if self.action == "delegate":
+            if not self.worker or not self.instruction or self.status != "working":
+                raise ValueError(
+                    "Delegation needs a worker, concrete instruction and working status"
+                )
+        elif self.worker or self.instruction or self.status == "working":
+            raise ValueError(
+                "A final reply must say complete or waiting and cannot promise queued work"
+            )
+        return self
+
+
+class WorkerResult(Record):
+    summary: str = Field(min_length=1)
+    status: Literal["complete", "blocked"]
+    remaining: list[str] = Field(default_factory=list)
+
+
 class RecoveryReply(WorkflowReply):
     next_action: (
         Literal["retry", "retry_longer", "recheck", "continue_without_commits", "continue_tests"]
@@ -335,6 +364,11 @@ class ChatReply(Explanation):
 
 
 AgentRole = Literal[
+    "orchestrator",
+    "coding_worker",
+    "check_worker",
+    "research_worker",
+    "review_worker",
     "test_runner",
     "chat",
     "explorer",
@@ -365,6 +399,11 @@ class AgentDraft(Explanation):
 
 
 SCHEMAS = {
+    "orchestrator": OrchestratorDecision,
+    "coding_worker": WorkerResult,
+    "check_worker": WorkerResult,
+    "research_worker": WorkerResult,
+    "review_worker": WorkerResult,
     "test_runner": CheckPlan,
     "validation_discovery": ValidationDiscovery,
     "agent_builder": AgentDraft,

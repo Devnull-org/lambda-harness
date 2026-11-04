@@ -108,10 +108,14 @@ class RoutedAgent:
         )
 
     def __call__(self, role, context, cwd):
+        self.last_generation = None
         agent = self.resolve(role)
         if context.get("agent_timeout") is not None:
             agent.timeout = max(agent.timeout, Backend.positive_timeout(context["agent_timeout"]))
-        result = agent(role, context, cwd)
+        try:
+            result = agent(role, context, cwd)
+        finally:
+            self.last_commands = getattr(agent, "last_commands", [])
         self.last_generation = {
             "backend": agent.name,
             "model": agent.model,

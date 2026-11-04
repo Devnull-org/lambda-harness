@@ -424,6 +424,7 @@ class LocalApp:
 
     def start(self, command):
         allowed = {
+            "orchestrate",
             "checks",
             "task_checks",
             "task_chat",
@@ -469,6 +470,7 @@ class LocalApp:
             "agent_id",
             "role",
             "finding_id",
+            "controller",
         ):
             if command.get(field) is not None and not isinstance(command[field], str):
                 raise ValueError(f"{field} must be text")
@@ -601,6 +603,8 @@ class LocalApp:
                 result = harness.task_chat(
                     task_id, command.get("text", ""), automatic=command.get("automatic")
                 )
+            elif action == "orchestrate":
+                result = harness.orchestrate(task_id, command.get("text", ""))
             elif action in {"start", "explore", "chat"}:
                 if not command.get("base"):
                     raise ValueError("Choose a base branch or commit")
@@ -608,7 +612,13 @@ class LocalApp:
                     task_id,
                     command.get("request", ""),
                     base=command["base"],
-                    phase="interview" if action == "start" else action,
+                    phase=(
+                        "orchestrator"
+                        if command.get("controller") == "orchestrator"
+                        else "interview"
+                    )
+                    if action == "start"
+                    else action,
                     walkthrough=command.get("walkthrough", False),
                 )
             elif action == "review":

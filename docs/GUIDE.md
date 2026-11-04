@@ -1,8 +1,32 @@
 # Lambda Harness user guide
 
-The website is the interface for conversations, approvals, phases, saved work,
+The website is the interface for conversations, permissions, saved work,
 backend selection, and project memory. Open **Workflow guide** in the sidebar
 for an in-app walkthrough.
+
+## The default: one task orchestrator
+
+Choose **New task → Work with an orchestrator** and describe what you want.
+The orchestrator answers directly or delegates to coding, check, research or
+review workers. Workers use the task's existing worktree. Their results return to
+the orchestrator, which can repair failures and run checks again without another
+phase-selection click. The final reply says what happened or what input is needed.
+
+For an existing feature task, send your instructions in its conversation; this
+adopts its saved work without starting over. You can also select **Continue**.
+**Run all checks and tests** asks the orchestrator to discover and execute the
+appropriate checks. Formatting edits stay in the task's worktree.
+
+Direct editing currently uses **Codex**. Your selected model and effort are passed
+to every delegated worker. Additional runtime permission requests still need an
+explicit decision in the conversation. Denying one lets the worker find an allowed
+approach or report the blocker. No commits or publishing happen unless requested.
+Use **Stop model** to interrupt work, then send revised instructions; completed
+edits are preserved. Expand a worker entry to inspect its command results.
+
+The phase-by-phase sections below describe the retained legacy workflow and
+standalone tools. They are not prerequisites for the orchestrator conversation.
+
 
 The sidebar names the **active project** and shows its checkout path. **Memory**
 and **Settings** belong to that project, with separate pages at

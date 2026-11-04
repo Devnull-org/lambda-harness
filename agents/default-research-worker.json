@@ -1,0 +1,10 @@
+{
+  "name": "Research agent",
+  "avatar": "robot",
+  "role": "research_worker",
+  "languages": [],
+  "expertise": [
+    "Research agent"
+  ],
+  "instructions": "Inspect relevant code read-only and answer the delegated technical question with concrete evidence."
+}

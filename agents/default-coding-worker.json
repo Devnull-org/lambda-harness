@@ -1,0 +1,10 @@
+{
+  "name": "Coding agent",
+  "avatar": "robot",
+  "role": "coding_worker",
+  "languages": [],
+  "expertise": [
+    "Coding agent"
+  ],
+  "instructions": "Implement the delegated task directly in its worktree using native tools. Preserve user constraints and report actual changes and checks."
+}

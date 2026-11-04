@@ -23,6 +23,7 @@ from .conversation import conversation_messages, interview_message
 from .failures import AgentInterrupted, BackendError, BackendResponseError
 from .github_actions import post_review_comment
 from .link_checks import check_documentation_links
+from .orchestrator import Orchestrator
 from .project_context import ContextStore, state_directory
 from .recovery import (
     COVERAGE_ERROR,
@@ -73,7 +74,7 @@ PHASE_NODES = {
 }
 
 
-class Harness(WorkflowOverrides, CheckRunner):
+class Harness(Orchestrator, WorkflowOverrides, CheckRunner):
     def __init__(
         self,
         repository,
@@ -106,6 +107,8 @@ class Harness(WorkflowOverrides, CheckRunner):
         )
         builder = StateGraph(dict)
         nodes = (
+            "orchestrator",
+            "orchestrator_worker",
             "plan_checks",
             "run_checks",
             "prepare",
@@ -289,7 +292,7 @@ class Harness(WorkflowOverrides, CheckRunner):
             raise ValueError(f"Task already exists: {task_id}; resume it instead")
         if mode not in {"phased", "full", "interview"} or not request.strip():
             raise ValueError("A request and a phased, full, or interview mode are required")
-        if phase not in {"interview", "explore", "chat"} and not standalone:
+        if phase not in {"interview", "explore", "chat", "orchestrator"} and not standalone:
             raise ValueError("A new task must start with interview, explore, or chat")
         base_revision = resolve_base(self.repository, base)
         agent_profiles = {} if phase == "agent_builder" else self.agents.selected(self.repository)
@@ -760,12 +763,14 @@ class Harness(WorkflowOverrides, CheckRunner):
                 "agent_profiles",
                 "saved_agent",
                 "handoff_origin",
+                "orchestrated",
             )
             if key in state
         }
         if state.get("agent_origin"):
             view["agent_id"] = state["agent_origin"]["id"]
         view["can_task_chat"] = state.get("task_kind") not in {"agent_builder", "chat"}
+        view["orchestrator_enabled"] = state.get("task_kind", "feature") == "feature"
         if state["stage"] == "exploration":
             view["prompt"] = {**view["prompt"], "actions": recovery_actions(state)}
         if view.get("prompt", {}).get("summary") == (
@@ -860,6 +865,21 @@ class Harness(WorkflowOverrides, CheckRunner):
     def _outcome(state, prompt):
         """Report saved workflow evidence without asking a model to invent a status."""
         stage = state["stage"]
+        if stage in {"orchestrating", "orchestrator_ready", "orchestrator_waiting"}:
+            return {
+                "kind": {
+                    "orchestrating": "running",
+                    "orchestrator_ready": "success",
+                    "orchestrator_waiting": "waiting",
+                }[stage],
+                "title": {
+                    "orchestrating": "Orchestrator working",
+                    "orchestrator_ready": "Request handled",
+                    "orchestrator_waiting": "Your input is needed",
+                }[stage],
+                "detail": prompt.get("summary", ""),
+                "guidance": "Continue the conversation with the orchestrator.",
+            }
         if stage in {"checks_complete", "checks_failed"}:
             result = state["check_results"]
             return {
@@ -1011,6 +1031,8 @@ class Harness(WorkflowOverrides, CheckRunner):
         )
 
     def _available_phases(self, state):
+        if state.get("orchestrated"):
+            return []
         if state.get("task_kind") in {"tests", "review", "chat", "agent_builder", "checks"}:
             return []
         following = {
@@ -1160,6 +1182,19 @@ class Harness(WorkflowOverrides, CheckRunner):
         return state
 
     def _context(self, state, role, **extra):
+        if role == "orchestrator":
+            workspace = self._workspace(state)
+            return {
+                "request": state["request"],
+                "specification": state.get("specification"),
+                "revision": workspace.revision,
+                "base_revision": state["base"],
+                "agent_timeout": state.get("agent_timeout"),
+                "project_context": self.context.for_agent(state["project_context_id"], workspace)
+                if state.get("project_context_id")
+                else None,
+                **extra,
+            }
         messages = messages_for_agent(state, role, explain=extra.get("intent") == "explain")
         if state.get("task_kind") == "agent_builder":
             return {

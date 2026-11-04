@@ -3989,7 +3989,7 @@ test("New task clears old PR review details and cached bases without polling awa
   field("require-walkthrough").checked = true;
 
   await field("new-task").onclick();
-  assert.equal(ui.kind.value, "explore");
+  assert.equal(ui.kind.value, "start");
   for (const id of [
     "task-name",
     "request",
@@ -4806,4 +4806,55 @@ test("work launched from this task keeps its composer indicator visible", async 
     ui.elements.get("response-progress-label").textContent,
     /Waiting for your permission/,
   );
+});
+
+test("existing feature task talks to orchestrator with selected model, without phase buttons", async () => {
+  const current = snapshot();
+  current.task.orchestrator_enabled = true;
+  current.task.stage = "tests_requested";
+  current.task.prompt = { actions: ["question"], available_phases: ["tests"] };
+  const sent = [];
+  const ui = await app({
+    fetcher: async (url, options) => {
+      if (url === "/api/command") sent.push(JSON.parse(options.body));
+      return response(current);
+    },
+  });
+  assert.equal(ui.elements.get("next-phases").hidden, true);
+  assert.equal(ui.elements.get("execution-controls").hidden, true);
+  assert.match(ui.elements.get("composer-label").textContent, /orchestrator/);
+  ui.elements.get("message").value = "Implement now. Keep tests unchanged.";
+  await ui.run('respond("task_chat")');
+  assert.equal(sent[0].command, "orchestrate");
+  assert.equal(sent[0].task_id, current.task.task_id);
+  assert.equal(sent[0].text, "Implement now. Keep tests unchanged.");
+  const next = ui.run("taskContinuation(state.task)");
+  assert.equal(next.body.command, "orchestrate");
+});
+
+test("orchestrator answers stay visible while worker command evidence is collapsed", async () => {
+  const current = snapshot();
+  current.task.orchestrator_enabled = true;
+  current.task.messages = [
+    { role: "orchestrator", answer: "I'll implement the requested change." },
+    {
+      role: "check_worker",
+      worker_result: {
+        worker: "check_worker",
+        summary: "Checks passed",
+        status: "complete",
+        commands: [{ command: "just check", exit_code: 0 }],
+      },
+    },
+    { role: "orchestrator", answer: "Implemented and checked." },
+  ];
+  const ui = await app({ fetcher: async () => response(current) });
+  const history = ui.elements.get("history");
+  assert.match(history.textContent, /Implemented and checked/);
+  const evidence = descendants(history, "details").find((n) =>
+    n.textContent.includes("just check"),
+  );
+  assert.ok(evidence);
+  assert.ok(!evidence.open);
+  assert.match(evidence.textContent, /Exit: 0/);
 });

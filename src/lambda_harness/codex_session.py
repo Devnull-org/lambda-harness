@@ -42,7 +42,20 @@ def strict_schema(schema):
 
 
 def run_session(
-    argv, cwd, *, prompt, schema, model, env, timeout, cancel, approve, progress=None, effort=None
+    argv,
+    cwd,
+    *,
+    prompt,
+    schema,
+    model,
+    env,
+    timeout,
+    cancel,
+    approve,
+    progress=None,
+    effort=None,
+    sandbox="read-only",
+    record_command=None,
 ):
     """Return the final structured reply and provider model; never auto-grant permissions."""
     if cancel is not None and cancel.is_set():
@@ -136,7 +149,10 @@ def run_session(
                                 }
                             )
                             continue
-                        if method in APPROVALS:
+                        if method in APPROVALS or (
+                            method == "item/fileChange/requestApproval"
+                            and sandbox == "workspace-write"
+                        ):
                             started = time.monotonic()
                             allowed = approve({"method": method, "details": params}, cancel)
                             deadline += time.monotonic() - started
@@ -177,7 +193,7 @@ def run_session(
                             send({"method": "initialized", "params": {}})
                             settings = {
                                 "cwd": str(cwd),
-                                "sandbox": "read-only",
+                                "sandbox": sandbox,
                                 "approvalPolicy": "on-request",
                                 "approvalsReviewer": "user",
                                 "ephemeral": True,
@@ -229,6 +245,14 @@ def run_session(
                             )
                     if method == "item/completed":
                         item = params.get("item", {})
+                        if item.get("type") == "commandExecution" and record_command:
+                            record_command(
+                                {
+                                    "command": item.get("command", ""),
+                                    "exit_code": item.get("exitCode"),
+                                    "output_tail": (item.get("aggregatedOutput") or "")[-4000:],
+                                }
+                            )
                         if item.get("type") == "agentMessage" and item.get("phase") != "commentary":
                             answer = item.get("text")
                     if method == "item/started" and progress:

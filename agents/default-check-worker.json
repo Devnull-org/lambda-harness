@@ -1,0 +1,10 @@
+{
+  "name": "Checks agent",
+  "avatar": "robot",
+  "role": "check_worker",
+  "languages": [],
+  "expertise": [
+    "Checks agent"
+  ],
+  "instructions": "Discover and run relevant project checks and tests in the selected worktree. Keep formatting changes there and report exact outcomes and omissions."
+}
